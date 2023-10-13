@@ -198,6 +198,11 @@ c.ADB_SHELL_INPUT_STYLUS_ROLL = "input stylus roll %s %s"
 c.ADB_SHELL_INPUT_TRACKBALL_SWIPE = "input trackball swipe %s %s %s %s %s"
 c.ADB_SHELL_INPUT_TRACKBALL_DRAGANDDROP = "input trackball draganddrop %s %s %s %s %s"
 c.ADB_SHELL_INPUT_TRACKBALL_ROLL = "input trackball roll %s %s"
+c.ADB_SHELL_GET_PIDOF = 'pidof %s'
+c.ADB_SHELL_AM_FORCE_STOP = 'am force-stop %s'
+c.ADB_SHELL_KILLALL_9 = 'killall -9 %s'
+c.ADB_SHELL_AM_KILL = 'am kill %s'
+c.ADB_SHELL_PKILL = 'pkill %s'
 splitos_reg_u = re.compile(r"[\\/]+", flags=re.I)
 splitos_reg_b = re.compile(rb"[\\/]+", flags=re.I)
 screenres_reg_cur = re.compile(rb"\bcur=(\d+)x(\d+)\b")
@@ -540,6 +545,52 @@ class AdbCommands(AdbEasyKey):
             "ps": ps,
             "longpress": longpress,
         }
+    def kill_package(self,package,**kwargs):
+        stdoutlist = []
+        stderrlist = []
+        stdout,stderr=self.sh_force_stop(package,**kwargs)
+        stdoutlist.extend(stdout)
+        stderrlist.extend(stderr)
+        stdout,stderr=self.sh_kill(package,**kwargs)
+        stdoutlist.extend(stdout)
+        stderrlist.extend(stderr)
+        stdout,stderr=self.sh_killall9(package,**kwargs)
+        stdoutlist.extend(stdout)
+        stderrlist.extend(stderr)
+        stdout,stderr=self.sh_am_kill(package,**kwargs)
+        stdoutlist.extend(stdout)
+        stderrlist.extend(stderr)
+        stdout,stderr=self.sh_pkill(package,**kwargs)
+        stdoutlist.extend(stdout)
+        stderrlist.extend(stderr)
+
+    def sh_pkill(self,package,**kwargs):
+        kwargs.update({'su':True})
+        return self.execute_sh_command( c.ADB_SHELL_PKILL % package, **kwargs)
+
+    def sh_am_kill(self,package,**kwargs):
+        return self.execute_sh_command( c.ADB_SHELL_AM_KILL % package, **kwargs)
+
+    def sh_killall9(self,package,**kwargs):
+        kwargs.update({'su':True})
+        return self.execute_sh_command(c.ADB_SHELL_KILLALL_9 % package, **kwargs)
+    def sh_kill(self,package,**kwargs):
+        kwargs.update({'su':True})
+        return self.execute_sh_command(f"kill {self.sh_get_pid_of(package)}", **kwargs)
+
+    def sh_force_stop(self,package,**kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_AM_FORCE_STOP % package,**kwargs)
+
+    def sh_get_pid_of(self,package,**kwargs):
+        stdout,stderr=self.execute_sh_command(c.ADB_SHELL_GET_PIDOF % package,**kwargs)
+        try:
+            if stdout:
+                return int(stdout[0].strip())
+        except Exception:
+            sys.stderr.write(f'{package} not found\n')
+            return -1
+
+
 
     def sh_start_while_loop_activity_check(
         self, activity_regex, positive_action, negative_action, sleep_time=1.0
