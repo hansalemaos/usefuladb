@@ -317,5 +317,8 @@ backgroundproc = uadb.sh_start_while_loop_activity_check(
     negative_action="input tap 1407 131",
     sleep_time=100,
 )
+self.sh_cat_copy_to_device(data=r"C:\Users\hansc\Pictures\infocards.txt",path='/sdcard/ababa.txt',escape_path=True)
+kwargs={'su':True}
+self.sh_cat_copy_to_device(data=r"C:\Users\hansc\Pictures\infocards.txt",path='/data/data/ababa.txt',escape_path=True,**kwargs)
 
 ```

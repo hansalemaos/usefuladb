@@ -1,8 +1,10 @@
+import base64
 import os
 import subprocess
 import sys
 import time
 import regex as re
+import requests
 from adbeasykey import AdbEasyKey, invisibledict, get_short_path_name
 from flatten_everything import flatten_everything
 from punktdict import PunktDict, dictconfig
@@ -563,6 +565,25 @@ class AdbCommands(AdbEasyKey):
         stdout,stderr=self.sh_pkill(package,**kwargs)
         stdoutlist.extend(stdout)
         stderrlist.extend(stderr)
+
+    def sh_cat_copy_to_device(self,data,path,escape_path=True,**kwargs):
+        if escape_path:
+            path = strip_quotes_and_escape(path)
+        if isinstance(data,str):
+            if os.path.exists(data):
+                with open(data,mode='rb') as f:
+                    data=f.read()
+            else:
+                dlower=data[:10].lower()
+                if dlower.startswith('http') and '://' in dlower:
+                    with requests.get(data) as r:
+                        data=r.content
+                data=data.encode('utf-8')
+        file_base64 = base64.b64encode(data).decode('utf-8')
+        adb_command = f'echo "{file_base64}" | base64 -d > {path}'
+        return self.execute_sh_command(adb_command,**kwargs)
+
+
 
     def sh_pkill(self,package,**kwargs):
         kwargs.update({'su':True})
