@@ -27,7 +27,7 @@ from punktdict import dictconfig
 dictconfig.allow_nested_attribute_creation = False
 dictconfig.allow_nested_key_creation = False
 dictconfig.convert_all_dicts_recursively = True
-from parsekeyevents import get_event_labels
+from .parsekeyevents import get_event_labels
 
 screenres_reg_cur = re.compile(rb"\bcur=(\d+)x(\d+)\b")
 screenres_reg = re.compile(rb"\bcur=(\d+)x(\d+)\b")
