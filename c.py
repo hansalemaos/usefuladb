@@ -12,6 +12,7 @@ ADBEXE_REVERSE_PORT = "reverse tcp:%s tcp:%s"
 ADBEXE_REMOVE_REVERSED_PORT = "reverse --remove tcp:%s"
 ADBEXE_PUSH = "push %s %s"
 ADBEXE_PULL = "pull %s %s"
+ADB_SHELL_DISABLE_INPUT_DEVICE='chmod a-w %s'
 ADB_SHELL_REALPATH = """realpath %s"""
 ADB_SHELL_DIRNAME = "dirname %s"
 ADB_SHELL_MD5SUM = """md5sum -b %s"""
@@ -567,7 +568,7 @@ execute_all() {
             j=$((j - 1))
             line0="${line0%?} "
             lxa=$(echo "$line0" | awk '{ for (i=1; i<=NF; i++) if ($i ~ /^[0-9,-]+$/) print $i }' || echo "0 0 0 0")
-            lxa2=$(echo "$lxa" | sed -n -E 's/[^0-9]*([0-9]+)[^0-9]+([0-9]+)[^0-9]+([0-9]+)[^0-9]+([0-9]+)[^0-9]*/\1 \2 \3 \4/p' || echo "0 0 0 0")
+            lxa2=$(echo "$lxa" | sed -n -E 's/[^0-9]*([-]?[0-9]+),([-]?[0-9]+)-([-]?[0-9]+),([-]?[0-9]+)[^0-9]*/\1 \2 \3 \4/p' || echo "0 0 0 0")
             string0="$line0"
             count0="${#string0}"
             string0="${string0#"${string0%%[![:space:]]*}"}"
@@ -1326,48 +1327,44 @@ ADB_SHELL_GET_ALL_MAC_ADDRESSES = (
 ADB_SHELL_NUMBER_OF_TCP_CONNECTIONS = '''netstat -an|grep -ci "tcp.*established"'''
 ADB_SHELL_APPEND_LINE_TO_FILE = """echo "%s" | tee -a %s"""
 ADB_SHELL_DUMP_ALL_DB_FILES = R"""#!/bin/bash
-find / -type f -iname "*.db" | while read -r dbfile; do
-    filename=\$(basename \"\$dbfile\")
-    
-    # Get a list of all table names in the database
-    table_names=\$(sqlite3 \"\$dbfile\" '.tables')
-
-    for table_name in \$table_names; do
-        echo \"Dumping data from \$dbfile as CSV for table \$table_name:\"
-        outputfile=\"/sdcard/\${filename}_\${table_name}_text.csv\"
-        sqlite3 \"\$dbfile\" <<EOF | awk -F \"|\" -v file=\"\$dbfile\" -v table=\"\$table_name\" 'BEGIN {OFS=\",\"} {print file, table, \$1, \$2, \$3, \$4, \$5, \$6, \$7}'
+for dbfile in `find / -type f -iname "*.db" 2>/dev/null`;do 
+	echo "$dbfile"
+	table_names=$(sqlite3 "$dbfile" '.tables')
+	    for table_name in $table_names; do
+        echo "Dumping data from $dbfile as CSV for table $table_name:"
+        outputfile="/sdcard/${filename}_${table_name}_text.csv"
+        sqlite3 "$dbfile" <<EOF | awk -F "|" -v file="$dbfile" -v table="$table_name" 'BEGIN {OFS=","} {print file, table, $1, $2, $3, $4, $5, $6, $7}'
 .headers on
 .mode list
 .output stdout
-SELECT * FROM \"\$table_name\";
+SELECT * FROM "$table_name";
 .quit
 EOF
     done
     rm -f /sdcard/*_text.csv
 done
+
 
 """
 ADB_SHELL_DUMP_ALL_DATABASES_IN_DATA_DATA = R"""
 #!/bin/bash
-find /data/data -type f | while read -r dbfile; do
-    filename=\$(basename \"\$dbfile\")
-    
-    # Get a list of all table names in the database
-    table_names=\$(sqlite3 \"\$dbfile\" '.tables')
-
-    for table_name in \$table_names; do
-        echo \"Dumping data from \$dbfile as CSV for table \$table_name:\"
-        outputfile=\"/sdcard/\${filename}_\${table_name}_text.csv\"
-        sqlite3 \"\$dbfile\" <<EOF | awk -F \"|\" -v file=\"\$dbfile\" -v table=\"\$table_name\" 'BEGIN {OFS=\",\"} {print file, table, \$1, \$2, \$3, \$4, \$5, \$6, \$7}'
+for dbfile in `find /data/data -type f -iname "*.db" 2>/dev/null`;do 
+	echo "$dbfile"
+	table_names=$(sqlite3 "$dbfile" '.tables')
+	    for table_name in $table_names; do
+        echo "Dumping data from $dbfile as CSV for table $table_name:"
+        outputfile="/sdcard/${filename}_${table_name}_text.csv"
+        sqlite3 "$dbfile" <<EOF | awk -F "|" -v file="$dbfile" -v table="$table_name" 'BEGIN {OFS=","} {print file, table, $1, $2, $3, $4, $5, $6, $7}'
 .headers on
 .mode list
 .output stdout
-SELECT * FROM \"\$table_name\";
+SELECT * FROM "$table_name";
 .quit
 EOF
     done
     rm -f /sdcard/*_text.csv
 done
+
 
 """
 ADB_SHELL_CAT_FILE_JOIN_NEWLINES = '''cat %s | tr "\\\\n", " "'''
@@ -1771,3 +1768,69 @@ done
 
 """
 
+ADB_SHELL_GETPROPS= 'getprop'
+ADB_SHELL_GET_ALL_SERVICES_FOR_DUMPSYS=R'''for i in $(dumpsys 2>/dev/null | grep "DUMP OF SERVICE" | cut -d' ' -f4 | cut -d':' -f1); do
+  echo "$i"
+done
+'''
+
+ADB_SHELL_CHECK_FILESIZE=f"""
+check_if_finished_writing(){{
+     while true; do
+            initial_size=$(stat -c %s "$1")
+            sleep $2
+            current_size=$(stat -c %s "$1")
+            if [ "$current_size" -eq "$initial_size" ]; then
+                break
+            fi
+        done
+        }}
+        """
+
+ADB_SHELL_GET_ALL_ACTIVITY_ELEMENTS='dumpsys activity top -a -c --checkin'
+ADB_UIAUTOMATOR_NICE20 = """nice -n %s %s"""
+ADB_SHELL_FORCE_IDLE="""
+dumpsys deviceidle enable all
+dumpsys deviceidle step
+dumpsys deviceidle force-idle
+"""
+ADB_SHELL_UNFORCE_IDLE = '''dumpsys deviceidle unforce'''
+ADB_SHELL_CURRENT_FOCUS='dumpsys window windows | grep mCurrentFocus'
+ADB_SHELL_TOP_ALL_PIDS_FROM_PROC_GREP="""
+#!/bin/bash
+
+pids=$(top -n 1 | grep 'REPLACEGREP' | grep -v 'grep' | awk '{print $1, $NF}')
+        for pid in "$pids"
+        do
+            echo "$pid"
+        done
+"""
+
+ADB_SHELL_GET_ALL_POSSIBLE_ACTIVITIES = '''dumpsys package -f r activity'''
+ADB_SHELL_AM_I_SU=f"""
+which su -- &> /dev/null
+    if [[ $? = "0" ]]; then
+        echo "True"
+    else
+        echo "False"
+    fi"""
+ADB_SHELL_DELETE_FILES_IN_FOLDER_OLDER_THAN=R"""
+delete_files_in_folder_older_than(){
+  find "$1" -name "$2" -type f -mmin "$3" -exec rm -f {} \;
+}
+
+delete_files_in_folder_older_than REPLACEFOLDER "REPLACEFILEFILTER" "REPLACEDISTANCE"
+
+"""
+ADB_SHELL_GET_NEWEST_FILE_IN_FOLDER_AS_TAR=R"""
+#!/bin/bash
+
+get_newest_file_in_folder_as_tar() {
+    cd "$1"
+    firstpart=$(find -type f -name "$2" -print0 | xargs -0 stat -c %Y\ %n | sort | tail -n 1)
+    secondpart=$(echo "$firstpart" | cut -b 12-1000)
+    tar -zcvf "$3" "$secondpart"
+}
+
+get_newest_file_in_folder_as_tar REPLACEFOLDER "REPLACEFILEFILTER" "REPLACETARPATH"
+"""

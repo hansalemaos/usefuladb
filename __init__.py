@@ -2,27 +2,34 @@ import ast
 import base64
 import importlib
 import io
-import os
 import random
 import shutil
 import socketserver
 import struct
-import subprocess
 import re
 import tarfile
 import tempfile
 import time
 from collections import namedtuple, defaultdict
-from functools import partial, cache
-import sys
-from functools import wraps
+from copy import deepcopy
+from functools import partial, wraps
 import requests
+from flatten_any_dict_iterable_or_whatsoever import fla_tu
+from indent2dict import indent2dict
+from lxml import etree
+from parifinder import parse_pairs
+
 from .keyevents import key_events
 from fabisschomagut import to_rgb_hex, to_rgb_tuple
 from normaltext import lookup
 from typing import Literal
 from punktdict import PunktDict as PunktDict_
 from punktdict import dictconfig
+
+numberreg = re.compile(r"\[([^,]+),([^,]+)\]\[([^,]+),([^,]+)\]", flags=re.I)
+
+CREATE_NEW_PROCESS_GROUP = 0x00000200
+DETACHED_PROCESS = 0x00000008
 
 dictconfig.allow_nested_attribute_creation = False
 dictconfig.allow_nested_key_creation = False
@@ -33,18 +40,65 @@ screenres_reg_cur = re.compile(rb"\bcur=(\d+)x(\d+)\b")
 screenres_reg = re.compile(rb"\bcur=(\d+)x(\d+)\b")
 from flatten_everything import flatten_everything
 from argskwargsmodifierclass import change_args_kwargs
-from subprocwriteread import (
-    SubProcInputOutput,
-    get_short_path_name,
-    invisibledict,
-    sleep,
-    send_ctrl_commands,
-    iswindows,
-    convert_path_to_short,
-)
+
 from . import c
 
 clsrgb = namedtuple("XYRGB", ["x", "y", "r", "g", "b"])
+refi = re.compile(r"([^,]+),([^,]+)-([^,]+),([^,]+)")
+
+
+def _parsexmluiauto(tree):
+    ellis = {}
+    ellis_children = defaultdict(set)
+    ellis_parents = defaultdict(set)
+
+    ellis_children_hierachy = defaultdict(set)
+
+    hierachyset = set()
+    uniquecounter = 0
+    hashcodesonly = {}
+
+    def rec2(t, number):
+        nonlocal uniquecounter
+        if not hasattr(t, "getchildren"):
+            method = t.iter
+        else:
+            method = t.getchildren
+        hierachyset.add(tuple(number))
+        hashcode2 = hash(t)
+        if hashcode2 not in ellis:
+            uniquecounter += 1
+            ellis[hashcode2] = {"element": t, "uniquehash": uniquecounter}
+            hashcodesonly[hashcode2] = uniquecounter
+
+        for x in method():
+            hashcode = hash(x)
+            ellis_children[hashcode2].add(hashcode)
+            ellis_parents[hashcode].add(hashcode2)
+            ellis_children_hierachy[hashcode2].add(tuple([hashcode]))
+
+            if hashcode not in ellis:
+                uniquecounter += 1
+                ellis[hashcode] = {"element": x, "uniquehash": uniquecounter}
+                hashcodesonly[hashcode] = uniquecounter
+            if hashcode not in number:
+                rec2(x, number + [hashcode])
+
+            else:
+                rec2(x, number)
+
+    hashroot = hash(tree)
+    hashcodesonly[hashroot] = uniquecounter
+    ellis[hashroot] = {"element": tree, "uniquehash": uniquecounter}
+    rec2(tree, [hashroot])
+    return (
+        ellis_children_hierachy,
+        hashroot,
+        hashcodesonly,
+        ellis,
+        ellis_parents,
+        ellis_children,
+    )
 
 
 def replace_rn_n(text):
@@ -67,6 +121,541 @@ valid_input_devices = Literal[
     "trackball",
     "",
 ]
+import ctypes
+import itertools
+import os
+import platform
+import signal
+import sys
+import subprocess
+import threading
+from collections import deque
+import re
+from time import sleep as sleep_
+from math import floor
+from functools import cache
+
+compiledregex = re.compile(r"^[A-Z]:\\", flags=re.I)
+
+iswindows = "win" in platform.platform().lower()
+if iswindows:
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    creationflags = subprocess.CREATE_NO_WINDOW
+    invisibledict = {
+        "startupinfo": startupinfo,
+        "creationflags": creationflags,
+        "start_new_session": True,
+    }
+    from ctypes import wintypes
+
+    windll = ctypes.LibraryLoader(ctypes.WinDLL)
+    user32 = windll.user32
+    kernel32 = windll.kernel32
+    GetExitCodeProcess = windll.kernel32.GetExitCodeProcess
+    CloseHandle = windll.kernel32.CloseHandle
+    GetExitCodeProcess.argtypes = [
+        ctypes.wintypes.HANDLE,
+        ctypes.POINTER(ctypes.c_ulong),
+    ]
+    CloseHandle.argtypes = [ctypes.wintypes.HANDLE]
+    GetExitCodeProcess.restype = ctypes.c_int
+    CloseHandle.restype = ctypes.c_int
+
+    GetWindowRect = user32.GetWindowRect
+    GetClientRect = user32.GetClientRect
+    _GetShortPathNameW = kernel32.GetShortPathNameW
+    _GetShortPathNameW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+    _GetShortPathNameW.restype = wintypes.DWORD
+else:
+    invisibledict = {}
+
+
+def is_process_alive(pid):
+    if re.search(
+        b"ProcessId=" + str(pid).encode() + rb"\s*$",
+        subprocess.run(
+            "wmic process list FULL", capture_output=True, **invisibledict
+        ).stdout,
+        flags=re.MULTILINE,
+    ):
+        return True
+    return False
+
+
+def index_all(s, n):
+    indototal = 0
+    allindex = []
+
+    while True:
+        try:
+            indno = s[indototal:].index(n)
+            indototal += indno + 1
+            allindex.append(indototal - 1)
+        except ValueError:
+            break
+    return allindex
+
+
+@cache
+def convert_path_to_short(string):
+    if not iswindows:
+        return string
+
+    l2 = [q - 1 for q in index_all(s=string, n=":\\")]
+    addtostring = []
+    try:
+        result1 = list_split(l=string, indices_or_sections=l2)
+    except Exception:
+        return string
+    try:
+        for string in result1:
+            if not compiledregex.search(string):
+                addtostring.append(string)
+                continue
+            activepath = ""
+            lastfoundpath = ""
+            lastfoundpath_end = 0
+            for ini, letter in enumerate(string):
+                activepath += letter
+                if ini < 3:
+                    continue
+                if letter.isspace():
+                    continue
+                if os.path.exists(activepath):
+                    lastfoundpath = activepath
+                    lastfoundpath_end = ini
+            if lastfoundpath:
+                addtostring.append(get_short_path_name(lastfoundpath))
+                addtostring.append(string[lastfoundpath_end + 1 :])
+            else:
+                addtostring.append(string)
+
+        return "".join(addtostring)
+    except Exception:
+        return string
+
+
+def list_split(l, indices_or_sections):
+    Ntotal = len(l)
+    try:
+        Nsections = len(indices_or_sections) + 1
+        div_points = [0] + list(indices_or_sections) + [Ntotal]
+    except TypeError:
+        Nsections = int(indices_or_sections)
+        if Nsections <= 0:
+            raise ValueError("number sections must be larger than 0.") from None
+        Neach_section, extras = divmod(Ntotal, Nsections)
+        section_sizes = (
+            [0] + extras * [Neach_section + 1] + (Nsections - extras) * [Neach_section]
+        )
+        div_points = []
+        new_sum = 0
+        for i in section_sizes:
+            new_sum += i
+            div_points.append(new_sum)
+
+    sub_arys = []
+    lenar = len(l)
+    for i in range(Nsections):
+        st = div_points[i]
+        end = div_points[i + 1]
+        if st >= lenar:
+            break
+        sub_arys.append((l[st:end]))
+
+    return sub_arys
+
+
+@cache
+def get_short_path_name(long_name):
+    try:
+        if not iswindows:
+            return long_name
+        output_buf_size = 4096
+        output_buf = ctypes.create_unicode_buffer(output_buf_size)
+        _ = _GetShortPathNameW(long_name, output_buf, output_buf_size)
+        return output_buf.value
+    except Exception as e:
+        sys.stderr.write(f"{e}\n")
+        return long_name
+
+
+def sleep(secs):
+    try:
+        if secs == 0:
+            return
+        maxrange = 50 * secs
+        if isinstance(maxrange, float):
+            sleeplittle = floor(maxrange)
+            sleep_((maxrange - sleeplittle) / 50)
+            maxrange = int(sleeplittle)
+        if maxrange > 0:
+            for _ in range(maxrange):
+                sleep_(0.016)
+
+    except KeyboardInterrupt:
+        return
+
+
+def killthread(threadobject):
+    # based on https://pypi.org/project/kthread/
+    if not threadobject.is_alive():
+        return True
+    tid = -1
+    for tid1, tobj in threading._active.items():
+        if tobj is threadobject:
+            tid = tid1
+            break
+    if tid == -1:
+        sys.stderr.write(f"{threadobject} not found")
+        return False
+    res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
+        ctypes.c_long(tid), ctypes.py_object(SystemExit)
+    )
+    if res == 0:
+        return False
+    elif res != 1:
+        ctypes.pythonapi.PyThreadState_SetAsyncExc(tid, 0)
+        return False
+    return True
+
+
+def index_all(s, n):
+    indototal = 0
+    allindex = []
+
+    while True:
+        try:
+            indno = s[indototal:].index(n)
+            indototal += indno + 1
+            allindex.append(indototal - 1)
+        except ValueError:
+            break
+    return allindex
+
+
+def send_ctrl_commands(pid, command=0):
+    # CTRL_C_EVENT = 0
+    # CTRL_BREAK_EVENT = 1
+    # CTRL_CLOSE_EVENT = 2
+    # CTRL_LOGOFF_EVENT = 3
+    # CTRL_SHUTDOWN_EVENT = 4
+    if iswindows:
+        commandstring = r"""import ctypes, sys; CTRL_C_EVENT, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT = 0, 1, 2, 3, 4; kernel32 = ctypes.WinDLL("kernel32", use_last_error=True); (lambda pid, cmdtosend=CTRL_C_EVENT: [kernel32.FreeConsole(), kernel32.AttachConsole(pid), kernel32.SetConsoleCtrlHandler(None, 1), kernel32.GenerateConsoleCtrlEvent(cmdtosend, 0), sys.exit(0) if isinstance(pid, int) else None])(int(sys.argv[1]), int(sys.argv[2]) if len(sys.argv) > 2 else None) if __name__ == '__main__' else None"""
+        subprocess.Popen(
+            [sys.executable, "-c", commandstring, str(pid), str(command)],
+            **invisibledict,
+        )  # Send Ctrl-C
+    else:
+        os.kill(pid, signal.SIGINT)
+
+
+class dequeslice(deque):
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return self.__class__(
+                itertools.islice(self, index.start, index.stop, index.step)
+            )
+        return deque.__getitem__(self, index)
+
+
+class SubProcInputOutput:
+    def __init__(
+        self,
+        cmd,
+        invisible=False,
+        print_stdout=True,
+        print_stderr=True,
+        limit_stdout=None,
+        limit_stderr=None,
+        limit_stdin=None,
+        convert_to_83=True,
+        separate_stdout_stderr_with_list=True,
+        **kwargs,
+    ):
+        if convert_to_83 and iswindows:
+            newcommand = []
+            if isinstance(cmd, (list, tuple)):
+                for element in cmd:
+                    if os.path.exists(element):
+                        newcommand.append(get_short_path_name(element))
+                    else:
+                        newcommand.append(element)
+            elif isinstance(cmd, str):
+                convert_path_to_short(cmd)
+            cmd = newcommand
+
+        self.cmd = cmd
+        self.separate_stdout_with_list = separate_stdout_stderr_with_list
+        self.separate_stderr_with_list = separate_stdout_stderr_with_list
+        self.lockobject = threading.Lock()
+        if self.separate_stdout_with_list:
+            self.stdout = dequeslice([[]], maxlen=limit_stdout)
+        else:
+            self.stdout = dequeslice([], maxlen=limit_stdout)
+        if self.separate_stderr_with_list:
+            self.stderr = dequeslice([[]], maxlen=limit_stderr)
+        else:
+            self.stderr = dequeslice([], maxlen=limit_stderr)
+
+        self.stdin = dequeslice([cmd], maxlen=limit_stdin)
+        self.print_stdout = print_stdout
+        self.print_stderr = print_stderr
+        kwargs.update(
+            {
+                "stdout": subprocess.PIPE,
+                "stdin": subprocess.PIPE,
+                "stderr": subprocess.PIPE,
+            }
+        )
+        if invisible:
+            kwargs.update(invisibledict)
+        kwargs.update({"bufsize": 0})
+        self.p = subprocess.Popen(cmd, **kwargs)
+        self._t_stdout = threading.Thread(target=self._read_stdout)
+        self._t_stderr = threading.Thread(target=self._read_stderr)
+        self._t_stdout.start()
+        self._t_stderr.start()
+
+    def _close_pipes(self, pipe):
+        try:
+            getattr(self.p, pipe).close()
+        except Exception as e:
+            sys.stderr.write(f"{e}\n")
+
+    def _close_proc(self):
+        try:
+            self.p.terminate()
+        except Exception as e:
+            sys.stderr.write(f"{e}\n")
+
+    def tkill(self):
+        if iswindows:
+            invi = invisibledict.copy()
+            invi.update(
+                {
+                    "creationflags": DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                }
+            )
+            _ = subprocess.Popen(f"taskkill /F /PID {self.p.pid} /T", **invi)
+
+    def kill_proc(
+        self, press_ctrl_c=True, sleep_after_pipes=1, sleep_after_proc=1, shellkill=True
+    ):
+        if press_ctrl_c:
+            try:
+                send_ctrl_commands(self.p.pid, 0)
+            except KeyboardInterrupt:
+                pass
+        self.tkill()
+        killthread(self._t_stdout)
+        killthread(self._t_stderr)
+        close_stdoutpipe = threading.Thread(target=lambda: self._close_pipes("stdout"))
+        close_stderrpipe = threading.Thread(target=lambda: self._close_pipes("stdin"))
+        close_stdinpipe = threading.Thread(target=lambda: self._close_pipes("stderr"))
+        close_stdoutpipe.start()
+        close_stderrpipe.start()
+        close_stdinpipe.start()
+        sleep(sleep_after_pipes)
+        close_proc = threading.Thread(target=self._close_proc)
+        close_proc.start()
+        sleep(sleep_after_proc)
+        if iswindows:
+            if shellkill and self.isalive():
+                _ = subprocess.Popen(
+                    f"taskkill /F /PID {self.p.pid} /T", **invisibledict
+                )
+        for thr in [close_stdoutpipe, close_stderrpipe, close_stdinpipe, close_proc]:
+            try:
+                killthread(thr)
+            except Exception as e:
+                sys.stderr.write(f"{e}\n")
+                sys.stderr.flush()
+
+    def _read_stdout(self):
+        for l in iter(self.p.stdout.readline, b""):
+            try:
+                if self.separate_stdout_with_list:
+                    self.stdout[-1].append(l)
+                else:
+                    self.stdout.append(l)
+                if self.print_stdout:
+                    sys.stdout.write(f'{l.decode("utf-8", "backslashreplace")}')
+                    sys.stdout.flush()
+
+            except Exception:
+                break
+
+    def _read_stderr(self):
+        for l in iter(self.p.stderr.readline, b""):
+            try:
+                if self.separate_stderr_with_list:
+                    self.stderr[-1].append(l)
+                else:
+                    self.stderr.append(l)
+                if self.print_stderr:
+                    sys.stderr.write(f'{l.decode("utf-8", "backslashreplace")}')
+                    sys.stderr.flush()
+            except Exception:
+                break
+
+    def disable_stderr_print(self):
+        self.print_stderr = False
+        return self
+
+    def disable_stdout_print(self):
+        self.print_stdout = False
+        return self
+
+    def enable_stderr_print(self):
+        self.print_stderr = True
+        return self
+
+    def enable_stdout_print(self):
+        self.print_stdout = True
+        return self
+
+    def write(
+        self,
+        cmd,
+        wait_to_complete=0.1,
+        convert_to_83=False,
+        exitcommand="",
+        commandtimeout=0,
+    ):
+        if convert_to_83:
+            cmd = convert_path_to_short(cmd)
+
+        exitcommandbytes = exitcommand.encode()
+
+        if wait_to_complete:
+            if iswindows:
+                finalcommand = exitcommandbytes + b"\r\n"
+            else:
+                finalcommand = exitcommandbytes + b"\n"
+        if isinstance(cmd, str):
+            cmd = cmd.encode()
+        if not cmd.endswith(b"\n"):
+            cmd = cmd + b"\n"
+        if cmd.startswith(b'b"') or cmd.startswith(b"b'"):
+            cmd = cmd[2:-1]
+        try:
+            self.lockobject.acquire()
+            stderrlist = []
+            stdoutlist = []
+            self.stdout.append(stdoutlist)
+            self.stderr.append(stderrlist)
+
+            try:
+                self.p.stdin.write(cmd)
+                self.p.stdin.flush()
+            except OSError as e:
+                sys.stderr.write(f"Connection broken {e}")
+                # self._reconnect_device()
+                raise e
+            self.stdin.append(cmd)
+        finally:
+            try:
+                self.lockobject.release()
+            except Exception:
+                pass
+
+        if wait_to_complete:
+            while True:
+                if finalcommand not in b"".join(stdoutlist):
+                    sleep(wait_to_complete)
+                else:
+                    break
+            stdoutl = []
+            stderrl = []
+            if stdoutlist:
+                stdoutl = (
+                    b"".join(stdoutlist)
+                    .split(finalcommand)[0]
+                    .splitlines(keepends=True)
+                )
+            if stderrlist:
+                stderrl = (
+                    b"".join(stderrlist)
+                    .split(finalcommand)[0]
+                    .splitlines(keepends=True)
+                )
+            return stdoutl, stderrl
+        return [stdoutlist, stderrlist]
+
+    def get_lock(self):
+        self.lockobject.acquire()
+        return self
+
+    def release_lock(self):
+        self.lockobject.release()
+        return self
+
+    def flush_stdout(self):
+        try:
+            self.get_lock()
+            self.stdout.clear()
+        finally:
+            try:
+                self.release_lock()
+            except Exception:
+                pass
+        return self
+
+    def flush_stderr(self):
+        try:
+            self.get_lock()
+            self.stderr.clear()
+        finally:
+            try:
+                self.release_lock()
+            except Exception:
+                pass
+        return self
+
+    def flush_stdin(self):
+        try:
+            self.get_lock()
+            self.stdin.clear()
+        finally:
+            try:
+                self.release_lock()
+            except Exception:
+                pass
+        return self
+
+    def flush_all_pipes(self):
+        self.stdin.clear()
+        self.stdout.clear()
+        self.stderr.clear()
+
+    def send_ctrl_c(self):
+        send_ctrl_commands(self.p.pid, command=0)
+        return self
+
+    def send_ctrl_break(self):
+        send_ctrl_commands(self.p.pid, command=1)
+        return self
+
+    def send_ctrl_close(self):
+        send_ctrl_commands(self.p.pid, command=2)
+        return self
+
+    def send_ctrl_logoff(self):
+        send_ctrl_commands(self.p.pid, command=3)
+        return self
+
+    def send_ctrl_shutdown(self):
+        send_ctrl_commands(self.p.pid, command=4)
+        return self
+
+    def isalive(self):
+        if iswindows:
+            return is_process_alive(self.p.pid)
+        else:
+            raise NotImplementedError
 
 
 class PunktDict(PunktDict_):
@@ -293,6 +882,7 @@ class AdbControlBase(SubProcInputOutput):
             convert_to_83=convert_to_83,
             separate_stdout_stderr_with_list=True,
         )
+        self._correct_newlines = False
 
     def execute_sh_command_global(self, cmd, **kwargs):
         try:
@@ -331,7 +921,7 @@ class AdbControlBase(SubProcInputOutput):
                         data = f.read()
                     return data
                 except Exception:
-                    sleep(0.1)
+                    sleep(0.05)
             return b""
 
         def pullfi(fi):
@@ -352,31 +942,39 @@ class AdbControlBase(SubProcInputOutput):
                     return
                 except Exception as e:
                     sys.stderr.write(f"{e}\n")
-                    sleep(0.1)
+                    sleep(0.05)
 
         excom = self.exitcommand.encode()
         if isinstance(cmd, str):
             cmd = cmd.encode()
-
+        checksize = c.ADB_SHELL_CHECK_FILESIZE.encode()
         cmd = (
-            b"""exec 2>"""
+            checksize
+            + b"""\nexec 2>"""
             + self.tmpfile_global_err_sdcardbin
             + b"""\nexec 1>"""
             + self.tmpfile_global_out_sdcardbin
             + b"\n"
             + cmd
             + b"""\n"""
-            + b"""exec 1>&-\n"""
-            + b"""exec 2>&-\n"""
-            + b"""\necho -n -e """
-            + excom
-            + b""">> """
+            + b"""check_if_finished_writing """
             + self.tmpfile_global_out_sdcardbin
-            + b"""\necho -n -e """
+            + b" 0.03"
+            + b"""\nexec 1>&-\n"""
+            + b"""exec 2>&-\n"""
+            + b"""\necho -e -n """
+            + excom
+            + b""" >> """
+            + self.tmpfile_global_out_sdcardbin
+            + b"""\necho -e -n """
             + excom
             + b""" >> """
             + self.tmpfile_global_err_sdcardbin
             + b"""\n"""
+            # + b"""echo\n"""
+            # + b"""echo\n"""
+            # + b"""echo\n"""
+            # + b"""echo\n"""
         )
         su = kwargs.get("su", False)
 
@@ -384,14 +982,18 @@ class AdbControlBase(SubProcInputOutput):
             cmd = b"#!/bin/bash\nsu\n" + cmd
         else:
             cmd = b"#!/bin/bash\n" + cmd
-
+        # print(cmd)
         self.p.stdin.write(cmd)
         self.p.stdin.flush()
         tout = kwargs.get("global_cmd_timeout", self.global_cmd_timeout)
-        delfi()
+        # sleep(.05)
+
+        # delfi()
+        # sleep(.05)
 
         while True:
             delfi()
+            sleep(0.01)
             pullfi(self.tmpfile_global_err_sdcard)
             so1 = read_tmp_file(self.tmpfile_global_err_full, tout)
             if excom in so1:
@@ -426,6 +1028,7 @@ class AdbControlBase(SubProcInputOutput):
         return [dataout, dataerr]
 
     def execute_sh_command(self, cmd, **kwargs):
+        self._correct_newlines = True
         if isinstance(cmd, str):
             try:
                 stackframe = sys._getframe(1)
@@ -440,6 +1043,7 @@ class AdbControlBase(SubProcInputOutput):
 
         global_cmd = kwargs.get("global_cmd", self.global_cmd)
         if global_cmd:
+            self._correct_newlines = False
             return self.execute_sh_command_global(cmd, **kwargs)
 
         oldvaluestdout = self.print_stdout
@@ -955,7 +1559,7 @@ class AdbControl(AdbControlBase):
         return self.execute_sh_command(c.ADB_SHELL_EMPTY_FILE % path, **kwargs)
 
     def format_output(self, stdout):
-        if iswindows:
+        if iswindows and self._correct_newlines:
             p = b"".join([x.replace(b"\r\n", b"\n") for x in stdout])
             try:
                 return p.split(self.exitcommand.encode())[0]
@@ -974,7 +1578,6 @@ class AdbControl(AdbControlBase):
             ]
 
         return self.format_output(da)
-
 
     def sh_cat_file_without_newlines(self, path, **kwargs):
         path2 = strip_quotes_and_escape(path)
@@ -1088,24 +1691,30 @@ class AdbControl(AdbControlBase):
             and re.search(rb"^\d+", g[1])
         ]
 
-    def sh_screencap(self, **kwargs):
+    def sh_screencap(self, correct_newlines=True, **kwargs):
         if "wait_to_complete" not in kwargs:
-            kwargs.update({"wait_to_complete": 0.005})
+            kwargs.update({"wait_to_complete": 0.01})
 
         stdout, stderr = self.execute_sh_command(c.ADB_SHELL_SCREENCAPRAW, **kwargs)
+        if not correct_newlines:
+            return b"".join(stdout)
+        # else:
         return self.format_output(stdout)
 
-    def sh_screencap_png(self, **kwargs):
+    def sh_screencap_png(self, correct_newlines=True, **kwargs):
         if "wait_to_complete" not in kwargs:
-            kwargs.update({"wait_to_complete": 0.005})
+            kwargs.update({"wait_to_complete": 0.01})
 
         stdout, stderr = self.execute_sh_command(c.ADB_SHELL_SCREENCAP, **kwargs)
+        if not correct_newlines:
+            return b"".join(stdout)
         return self.format_output(stdout)
 
     def open_adb_shell(self):
         if iswindows:
+            cmdcom = get_comspec()
             subprocess.run(
-                f'start cmd /k "{self.adbpath}" -s {self.device_serial} shell',
+                f'start {cmdcom} /k "{self.adbpath}" -s {self.device_serial} shell',
                 shell=True,
                 **invisibledict,
             )
@@ -2155,7 +2764,7 @@ class AdbControl(AdbControlBase):
         return self.execute_sh_command(c.ADB_SHELL_PRIVACY_SETTINGS, **kwargs)
 
     def sh_touch(self, path, **kwargs):
-        folderpath = strip_quotes_and_escape("/".join(path.split("/")[:-1]))
+        folderpath = "/".join(path.split("/")[:-1])
         self.sh_mkdir(folderpath, **kwargs)
         return self.execute_sh_command(
             c.ADB_SHELL_TOUCH % strip_quotes_and_escape(path), **kwargs
@@ -2224,6 +2833,273 @@ class AdbControl(AdbControlBase):
         if stdout:
             stdout = stdout[0].strip().split(rb",")
             return int(stdout[2]), int(stdout[3]), int(stdout[4])
+
+    @add_to_kwargs(
+        v=(
+            ("capture_stdout_stderr_first", True),
+            ("wait_to_complete", 0.1),
+        )
+    )
+    def get_all_activity_elements(self, as_pandas=False, **kwargs):
+        @cache
+        def findchi(ff):
+            try:
+                r0 = parse_pairs(string=ff, s1="{", s2="}", str_regex=False)
+                datadict = {}
+                maininfos = list(
+                    {
+                        k: v
+                        for k, v in sorted(
+                            r0.items(), key=lambda q: len(q[0]), reverse=True
+                        )
+                    }.items()
+                )[0]
+                otherdata = ff.split(maininfos[-1]["text"])
+                t = maininfos[-1]["text"][1:-1] + " ÇÇÇÇÇÇ ÇÇÇÇÇÇ"
+                infosplit = t.split(maxsplit=5)
+                firstimesearch = infosplit[1]
+                secondtimesearch = infosplit[2]
+                datadict["START_X"] = -1
+                datadict["START_Y"] = -1
+                datadict["CENTER_X"] = -1
+                datadict["CENTER_Y"] = -1
+                datadict["AREA"] = -1
+                datadict["END_X"] = -1
+                datadict["END_Y"] = -1
+                datadict["WIDTH"] = -1
+                datadict["HEIGHT"] = -1
+                datadict["START_X_RELATIVE"] = -1
+                datadict["START_Y_RELATIVE"] = -1
+                datadict["END_X_RELATIVE"] = -1
+                datadict["END_Y_RELATIVE"] = -1
+
+                try:
+                    datadict["COORDS"] = infosplit[-3].rstrip("Ç ")
+                except Exception:
+                    datadict["COORDS"] = None
+                try:
+                    datadict["INT_COORDS"] = tuple(
+                        map(int, (refi.findall(datadict["COORDS"])[0]))
+                    )  # tuple(map(int, re.split(r'\W+', datadict['COORDS'])))
+                except Exception:
+                    datadict["INT_COORDS"] = ()
+                try:
+                    datadict["CLASSNAME"] = otherdata[0]
+                except Exception:
+                    datadict["CLASSNAME"] = None
+
+                try:
+                    datadict["HASHCODE"] = infosplit[-2].rstrip("Ç ")
+                except Exception:
+                    datadict["HASHCODE"] = None
+                try:
+                    datadict["ELEMENT_ID"] = infosplit[-1].rstrip("Ç ")
+                except Exception:
+                    datadict["ELEMENT_ID"] = None
+                try:
+                    datadict["MID"] = infosplit[0]
+                except Exception:
+                    datadict["MID"] = None
+                try:
+                    datadict["VISIBILITY"] = firstimesearch[0]
+                except Exception:
+                    datadict["VISIBILITY"] = None
+
+                try:
+                    datadict["FOCUSABLE"] = firstimesearch[1]
+                except Exception:
+                    datadict["FOCUSABLE"] = None
+
+                try:
+                    datadict["ENABLED"] = firstimesearch[2]
+                except Exception:
+                    datadict["ENABLED"] = None
+
+                try:
+                    datadict["DRAWN"] = firstimesearch[3]
+                except Exception:
+                    datadict["DRAWN"] = None
+
+                try:
+                    datadict["SCROLLBARS_HORIZONTAL"] = firstimesearch[4]
+                except Exception:
+                    datadict["SCROLLBARS_HORIZONTAL"] = None
+
+                try:
+                    datadict["SCROLLBARS_VERTICAL"] = firstimesearch[5]
+                except Exception:
+                    datadict["SCROLLBARS_VERTICAL"] = None
+
+                try:
+                    datadict["CLICKABLE"] = firstimesearch[6]
+                except Exception:
+                    datadict["CLICKABLE"] = None
+
+                try:
+                    datadict["LONG_CLICKABLE"] = firstimesearch[7]
+                except Exception:
+                    datadict["LONG_CLICKABLE"] = None
+
+                try:
+                    datadict["CONTEXT_CLICKABLE"] = firstimesearch[8]
+                except Exception:
+                    datadict["CONTEXT_CLICKABLE"] = None
+
+                try:
+                    datadict["PFLAG_IS_ROOT_NAMESPACE"] = secondtimesearch[0]
+                except Exception:
+                    datadict["PFLAG_IS_ROOT_NAMESPACE"] = None
+
+                try:
+                    datadict["PFLAG_FOCUSED"] = secondtimesearch[1]
+                except Exception:
+                    datadict["PFLAG_FOCUSED"] = None
+
+                try:
+                    datadict["PFLAG_SELECTED"] = secondtimesearch[2]
+                except Exception:
+                    datadict["PFLAG_SELECTED"] = None
+
+                try:
+                    datadict["PFLAG_PREPRESSED"] = secondtimesearch[3]
+                except Exception:
+                    datadict["PFLAG_PREPRESSED"] = None
+
+                try:
+                    datadict["PFLAG_HOVERED"] = secondtimesearch[4]
+                except Exception:
+                    datadict["PFLAG_HOVERED"] = None
+
+                try:
+                    datadict["PFLAG_ACTIVATED"] = secondtimesearch[5]
+                except Exception:
+                    datadict["PFLAG_ACTIVATED"] = None
+
+                try:
+                    datadict["PFLAG_INVALIDATED"] = secondtimesearch[6]
+                except Exception:
+                    datadict["PFLAG_INVALIDATED"] = None
+
+                try:
+                    datadict["PFLAG_DIRTY_MASK"] = secondtimesearch[7]
+                except Exception:
+                    datadict["PFLAG_DIRTY_MASK"] = None
+                return maininfos, otherdata, datadict
+            except Exception as fe:
+                # sys.stderr.write(f'{fe}')
+                return None
+
+        allda = self.execute_sh_command(
+            c.ADB_SHELL_GET_ALL_ACTIVITY_ELEMENTS, **kwargs
+        )[0]
+
+        allsi = list_split(
+            allda,
+            [
+                i
+                for i, x in enumerate(allda)
+                if re.search(rb"^\s*(?:(?:View Hierarchy:)|(?:Looper))", x)
+            ],
+        )
+        allsplits = [x for x in allsi if b"View Hierarchy:" in x[0]]
+        allconvdata = []
+
+        for elemtindex, a in enumerate(allsplits):
+            di = indent2dict(
+                b"".join(a[:]).decode("utf-8", "backslashreplace"), removespaces=True
+            )
+            allchildrendata = []
+            hierachcounter = 0
+            for f in fla_tu(di):
+                allchildrendata.append([])
+
+                hierachcounter += 1
+                hierachcounter2 = 0
+                for ff in f[1]:
+                    try:
+                        try:
+                            maininfos2, otherdata2, datadict2 = findchi(ff)
+                            datadict = deepcopy(datadict2)
+                        except Exception:
+                            continue
+                        allchildrendata[-1].append(datadict)
+                        allchildrendata[-1][-1]["START_X"] = sum(
+                            [x["INT_COORDS"][0] for x in allchildrendata[-1]]
+                        )
+                        allchildrendata[-1][-1]["START_Y"] = sum(
+                            [x["INT_COORDS"][1] for x in allchildrendata[-1]]
+                        )
+                        allchildrendata[-1][-1]["WIDTH"] = (
+                            allchildrendata[-1][-1]["INT_COORDS"][2]
+                            - allchildrendata[-1][-1]["INT_COORDS"][0]
+                        )
+                        allchildrendata[-1][-1]["HEIGHT"] = (
+                            allchildrendata[-1][-1]["INT_COORDS"][3]
+                            - allchildrendata[-1][-1]["INT_COORDS"][1]
+                        )
+
+                        allchildrendata[-1][-1]["END_X"] = (
+                            allchildrendata[-1][-1]["START_X"]
+                            + allchildrendata[-1][-1]["WIDTH"]
+                        )
+                        allchildrendata[-1][-1]["END_Y"] = (
+                            allchildrendata[-1][-1]["START_Y"]
+                            + allchildrendata[-1][-1]["HEIGHT"]
+                        )
+                        allchildrendata[-1][-1]["CENTER_X"] = allchildrendata[-1][-1][
+                            "START_X"
+                        ] + (allchildrendata[-1][-1]["WIDTH"] // 2)
+                        allchildrendata[-1][-1]["CENTER_Y"] = allchildrendata[-1][-1][
+                            "START_Y"
+                        ] + (allchildrendata[-1][-1]["HEIGHT"] // 2)
+
+                        allchildrendata[-1][-1]["AREA"] = (
+                            allchildrendata[-1][-1]["HEIGHT"]
+                            * allchildrendata[-1][-1]["WIDTH"]
+                        )
+
+                        allchildrendata[-1][-1]["START_X_RELATIVE"] = allchildrendata[
+                            -1
+                        ][-1]["INT_COORDS"][0]
+                        allchildrendata[-1][-1]["START_Y_RELATIVE"] = allchildrendata[
+                            -1
+                        ][-1]["INT_COORDS"][1]
+                        allchildrendata[-1][-1]["END_X_RELATIVE"] = allchildrendata[-1][
+                            -1
+                        ]["INT_COORDS"][2]
+                        allchildrendata[-1][-1]["END_Y_RELATIVE"] = allchildrendata[-1][
+                            -1
+                        ]["INT_COORDS"][3]
+                        allchildrendata[-1][-1]["IS_PARENT"] = True
+                        allchildrendata[-1][-1]["VIEW_INDEX"] = elemtindex
+                        allchildrendata[-1][-1]["HIERACHY_CLUSTER"] = hierachcounter
+                        allchildrendata[-1][-1]["HIERACHY_SINGLE"] = hierachcounter2
+                        hierachcounter2 = hierachcounter2 + 1
+
+                    except Exception as e:
+                        continue
+
+            try:
+                allchildrendata[-1][-1]["IS_PARENT"] = False
+                allconvdata.append(deepcopy(allchildrendata))
+
+            except Exception:
+                pass
+        if as_pandas:
+            try:
+                pd = importlib.import_module("pandas")
+                alldfs = []
+                for allchildrendataxx in allconvdata:
+                    df = pd.concat(
+                        [pd.DataFrame(x) for x in allchildrendataxx], ignore_index=True
+                    )
+                    alldfs.append(df)
+                return pd.concat(alldfs, ignore_index=True)
+            except Exception as e:
+                sys.stderr.write(f"{e}\n")
+                sys.stderr.flush()
+
+        return allconvdata
 
     def get_activity_element_dump(
         self,
@@ -2673,8 +3549,11 @@ class AdbControl(AdbControlBase):
 
     @change_args_kwargs(args_and_function=(("folder", _escape_filepath),))
     def sh_get_all_chmod_from_files_in_folder(self, folder, **kwargs):
-        foldernew=folder.strip('/')
-        return self.execute_sh_command(c.ADB_SHELL_GET_ALL_CHMOD_IN_FOLDER.replace('REPLACE_FOLDER',foldernew), **kwargs)
+        foldernew = folder.strip("/")
+        return self.execute_sh_command(
+            c.ADB_SHELL_GET_ALL_CHMOD_IN_FOLDER.replace("REPLACE_FOLDER", foldernew),
+            **kwargs,
+        )
 
     def sh_list_all_connected_ips(self, **kwargs):
         return self.execute_sh_command(c.ADB_SHELL_ALL_CONNECTED_IPS, **kwargs)
@@ -2838,7 +3717,6 @@ class AdbControl(AdbControlBase):
 
     @change_args_kwargs(args_and_function=(("folder", _escape_filepath),))
     def sh_newest_file_in_folder(self, folder, **kwargs):
-
         return self.execute_sh_command(
             c.ADB_SHELL_NEWEST_FILE_IN_FOLDER % folder, **kwargs
         )
@@ -2848,7 +3726,6 @@ class AdbControl(AdbControlBase):
 
     @change_args_kwargs(args_and_function=(("file", _escape_filepath),))
     def sh_print_file_with_linenumbers(self, file, **kwargs):
-
         return self.execute_sh_command(
             c.ADB_SHELL_PRINT_FILE_WITH_LINENUMBERS % file, **kwargs
         )
@@ -2877,14 +3754,12 @@ class AdbControl(AdbControlBase):
 
     @change_args_kwargs(args_and_function=(("file", _escape_filepath),))
     def sh_kill_process_that_is_locking_a_file(self, file, **kwargs):
-
         return self.execute_sh_command(
             c.ADB_KILL_A_PROCESS_THAT_IS_LOCKING_A_FILE % file, **kwargs
         )
 
     @change_args_kwargs(args_and_function=(("file", _escape_filepath),))
     def sh_print_lines_of_file_with_at_least_length_n(self, file, n, **kwargs):
-
         return self.execute_sh_command(
             c.ADB_SHELL_PRINT_LINES_LONGER_THAN % (int(n), file), **kwargs
         )
@@ -3016,19 +3891,238 @@ class AdbControl(AdbControlBase):
             c.ADB_SHELL_APPEND_LINE_TO_FILE % (line, file), **kwargs
         )
 
-    @add_to_kwargs(v=(("su", False),))
+    @add_to_kwargs(v=(("su", True),))
     def sh_dump_all_db_files(self, as_pandas=False, **kwargs):
         return self._sh_dump_db_files(
             c.ADB_SHELL_DUMP_ALL_DB_FILES, as_pandas=as_pandas, **kwargs
         )
 
-    @add_to_kwargs(v=(("su", False),))
+    @add_to_kwargs(v=(("su", True),))
     def sh_dump_all_databases_in_data_data(self, as_pandas=False, **kwargs):
         return self._sh_dump_db_files(
             c.ADB_SHELL_DUMP_ALL_DATABASES_IN_DATA_DATA, as_pandas=as_pandas, **kwargs
         )
 
-    @add_to_kwargs(v=(("su", False), ("print_stdout", False), ("wait_to_complete", 0)))
+    @change_args_kwargs(args_and_function=(("folder", _escape_filepath),))
+    def sh_delete_files_in_folder_older_than(
+        self, folder, file_filter="*", date_distance="+1", **kwargs
+    ):
+        return self.execute_sh_command(
+            c.ADB_SHELL_DELETE_FILES_IN_FOLDER_OLDER_THAN.replace(
+                "REPLACEFOLDER", folder
+            )
+            .replace("REPLACEFILEFILTER", file_filter)
+            .replace("REPLACEDISTANCE", date_distance),
+            **kwargs,
+        )
+
+    @change_args_kwargs(args_and_function=(("folder", _escape_filepath),))
+    def sh_get_newest_file_in_folder_as_tar(
+        self, folder, file_filter="*", tarpath="/ssdcard/newestar.tar.gz", **kwargs
+    ):
+        return self.execute_sh_command(
+            c.ADB_SHELL_GET_NEWEST_FILE_IN_FOLDER_AS_TAR.replace(
+                "REPLACEFOLDER", folder
+            )
+            .replace("REPLACEFILEFILTER", file_filter)
+            .replace("REPLACETARPATH", tarpath),
+            **kwargs,
+        )
+
+    def uiautomator_nice20(self, timeout=60, nice=True, su=True, as_pandas=False):
+        niceadd = "nice -n -20 " if nice else ""
+        dumpath = "/sdcard/window_dump.xml"
+        self.sh_remove_file(dumpath)
+        parser = etree.XMLParser()
+        timeoutfinal = time.time() + timeout
+        while True:
+            if timeoutfinal < time.time():
+                return {}
+            try:
+                so, se = self.execute_sh_command(
+                    f"""
+    getui(){{
+    {niceadd}uiautomator dump 2>&1 >/dev/null
+    }}
+    getui
+    cat {dumpath}""",
+                    su=su,
+                    capture_stdout_stderr_first=True,
+                    wait_to_complete=0.1,
+                    global_cmd=True,
+                )
+                #
+                sox = [x for x in so if x.startswith(b"<?")][0]
+                tree = etree.parse(
+                    io.BytesIO(sox.rsplit(b">", maxsplit=1)[0] + b">"), parser
+                )
+                break
+            except Exception as e:
+                self.sh_remove_file(
+                    dumpath,
+                    su=su,
+                    capture_stdout_stderr_first=True,
+                    wait_to_complete=0.1,
+                    global_cmd=True,
+                )
+                try:
+                    print(so)
+                except Exception:
+                    pass
+                time.sleep(0.5)
+                sys.stderr.write(f"{e}")
+                sys.stderr.flush()
+
+        (
+            ellis_children_hierachy,
+            hashroot,
+            hashcodesonly,
+            ellis,
+            ellis_parents,
+            ellis_children,
+        ) = _parsexmluiauto(tree)
+        itemsdict = {}
+
+        for key, item1 in ellis.items():
+            item = item1["element"]
+            try:
+                allitems = (("tag", item.tag),) + tuple(item.items())
+
+            except Exception:
+                allitems = ((None, None),)
+            itemsdict[key] = allitems
+        rotation = -1
+        itemsdictfinal = {}
+        for k, v in itemsdict.items():
+            newid = hashcodesonly[k]
+            par = ellis_parents.get(k, None)
+            chi = ellis_children.get(k, None)
+            if su := {None, "rotation"}.intersection({n[0] for n in v}):
+                if "rotation" in su:
+                    for axs in v:
+                        if axs[0] == "rotation":
+                            rotation = int(axs[1])
+                continue
+            else:
+                itemsdictfinal[newid] = dict(v)
+            for key in itemsdictfinal[newid]:
+                if itemsdictfinal[newid][key] == "true":
+                    itemsdictfinal[newid][key] = True
+                if itemsdictfinal[newid][key] == "false":
+                    itemsdictfinal[newid][key] = False
+            itemsdictfinal[newid]["rotation"] = rotation
+            itemsdictfinal[newid]["all_parents"] = ()
+            itemsdictfinal[newid]["all_children"] = ()
+            itemsdictfinal[newid]["start_x"] = -1
+            itemsdictfinal[newid]["start_y"] = -1
+            itemsdictfinal[newid]["end_x"] = -1
+            itemsdictfinal[newid]["end_y"] = -1
+            itemsdictfinal[newid]["area"] = -1
+            itemsdictfinal[newid]["center_x"] = -1
+            itemsdictfinal[newid]["center_y"] = -1
+            itemsdictfinal[newid]["width"] = -1
+            itemsdictfinal[newid]["height"] = -1
+            itemsdictfinal[newid]["ratio"] = -1
+            try:
+                itemsdictfinal[newid]["bounds"] = tuple(
+                    map(
+                        int,
+                        flatten_everything(
+                            numberreg.findall(itemsdictfinal[newid]["bounds"])
+                        ),
+                    )
+                )
+                itemsdictfinal[newid]["start_x"] = itemsdictfinal[newid]["bounds"][0]
+                itemsdictfinal[newid]["start_y"] = itemsdictfinal[newid]["bounds"][1]
+                itemsdictfinal[newid]["end_x"] = itemsdictfinal[newid]["bounds"][2]
+                itemsdictfinal[newid]["end_y"] = itemsdictfinal[newid]["bounds"][3]
+                itemsdictfinal[newid]["width"] = (
+                    itemsdictfinal[newid]["end_x"] - itemsdictfinal[newid]["start_x"]
+                )
+                itemsdictfinal[newid]["height"] = (
+                    itemsdictfinal[newid]["end_y"] - itemsdictfinal[newid]["start_y"]
+                )
+                itemsdictfinal[newid]["area"] = (
+                    itemsdictfinal[newid]["width"] * itemsdictfinal[newid]["height"]
+                )
+                itemsdictfinal[newid]["center_x"] = itemsdictfinal[newid]["start_x"] + (
+                    itemsdictfinal[newid]["width"] // 2
+                )
+                itemsdictfinal[newid]["center_y"] = itemsdictfinal[newid]["start_y"] + (
+                    itemsdictfinal[newid]["height"] // 2
+                )
+                itemsdictfinal[newid]["ratio"] = (
+                    itemsdictfinal[newid]["width"] / itemsdictfinal[newid]["height"]
+                )
+
+            except Exception:
+                itemsdictfinal[newid]["bounds"] = ()
+            try:
+                if par:
+                    itemsdictfinal[newid]["all_parents"] = tuple(
+                        ii
+                        for ii in (
+                            sorted(
+                                list(
+                                    set(
+                                        flatten_everything(
+                                            [
+                                                tuple([hashcodesonly[tt] for tt in t])
+                                                for t in (
+                                                    [
+                                                        ellis_parents.get(k1, None)
+                                                        for k1 in par
+                                                    ]
+                                                )
+                                                if t
+                                            ]
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                        if ii not in [0, 1]
+                    )
+            except Exception:
+                pass
+            try:
+                if chi:
+                    itemsdictfinal[newid]["all_children"] = tuple(
+                        ii
+                        for ii in (
+                            sorted(
+                                list(
+                                    set(
+                                        flatten_everything(
+                                            [
+                                                tuple([hashcodesonly[tt] for tt in t])
+                                                for t in (
+                                                    [
+                                                        ellis_children.get(k1, None)
+                                                        for k1 in chi
+                                                    ]
+                                                )
+                                                if t
+                                            ]
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                        if ii not in [0, 1]
+                    )
+            except Exception:
+                pass
+        if as_pandas:
+            try:
+                pd = importlib.import_module("pandas")
+                return pd.DataFrame(itemsdictfinal).T
+            except Exception as e:
+                sys.stderr.write(f"{e}\n")
+                sys.stderr.flush()
+        return itemsdictfinal
+
+    @add_to_kwargs(v=(("su", True), ("print_stdout", False), ("wait_to_complete", 0)))
     def _sh_dump_db_files(self, command, as_pandas=False, **kwargs):
         dbfiles = self.execute_sh_command(command, **kwargs)
         sleep(10)
@@ -3104,6 +4198,57 @@ class AdbControl(AdbControlBase):
             x.strip().decode("utf-8", "backslashreplace").split(maxsplit=1) for x in so
         ]
 
+    def sh_list_dev_input(self, **kwargs):
+        return [
+            f"/dev/input/{x.decode().strip()}"
+            for x in self.sh_ls_folder("/dev/input", **kwargs)[0]
+        ]
+
+    def sh_get_all_props(self, **kwargs):
+        return [
+            [y[0].strip(b"[] ").decode(), y[1].strip(b"[]\n ").decode()]
+            for y in [
+                x.split(b": ", maxsplit=1)
+                for x in self.execute_sh_command(c.ADB_SHELL_GETPROPS, **kwargs)[0]
+            ]
+        ]
+
+    def sh_get_all_dumpsys_services(self, **kwargs):
+        return [
+            q.decode().strip()
+            for q in self.execute_sh_command(
+                c.ADB_SHELL_GET_ALL_SERVICES_FOR_DUMPSYS, **kwargs
+            )[0]
+        ]
+
+    def sh_dumpsys_everything(self, **kwargs):
+        alli = []
+        alls = self.sh_get_all_dumpsys_services(**kwargs)
+        for a in alls:
+            sleep(0.1)
+            alli.append([a, self.execute_sh_command(f"dumpsys {a} 2>/dev/null")[0]])
+        return alli
+
+    def sh_get_all_extra_options_from_dumpsys(self, **kwargs):
+        extraoptions = []
+
+        alli = []
+        alls = self.sh_get_all_dumpsys_services(**kwargs)
+        allcommands = []
+        for a in alls:
+            sleep(0.1)
+            alli.append([self.execute_sh_command(f"dumpsys {a} 2>/dev/null")], **kwargs)
+            sleep(0.1)
+            alli[-1].append(self.execute_sh_command(f"dumpsys {a} -h"), **kwargs)
+            allcommands.append(a)
+        i = -1
+        for p1, p2 in alli:
+            i += 1
+            if p1 != p2:
+                if b" options:" in b"".join(p2[0]):
+                    extraoptions.append([allcommands[i], p2])
+        return extraoptions
+
     @add_to_kwargs(
         v=(
             ("su", True),
@@ -3126,8 +4271,9 @@ class AdbControl(AdbControlBase):
         tmpfilegetevent = tmpfilegetevent.strip("/")
         tmpfilegetevent = f"""/sdcard/{tmpfilegetevent}"""
         print(f"File will be saved: {tmpfilegetevent}")
+        cmdcom = get_comspec()
         subprocess.run(
-            f'''start cmd /k {self.adbpath} -s {self.device_serial} shell "getevent -t >'{tmpfilegetevent}'"''',
+            f'''start {cmdcom} /k {self.adbpath} -s {self.device_serial} shell "getevent -t >'{tmpfilegetevent}'"''',
             shell=True,
         )
         return tmpfilegetevent
@@ -3137,8 +4283,9 @@ class AdbControl(AdbControlBase):
         tmpfilegetevent = f"""/sdcard/{tmpfilegetevent}"""
         print(f"File will be saved: {tmpfilegetevent}")
         device = device.rstrip("/")
+        cmdcom = get_comspec()
         subprocess.run(
-            f'''start cmd /k {self.adbpath} -s {self.device_serial} shell su -c "cat {device} > {tmpfilegetevent}"''',
+            f'''start {cmdcom} /k {self.adbpath} -s {self.device_serial} shell su -c "cat {device} > {tmpfilegetevent}"''',
             shell=True,
         )
         return tmpfilegetevent
@@ -3256,7 +4403,7 @@ class AdbControl(AdbControlBase):
         ju = b""
         while b"REGULAR" not in ju:
             so, se = self.execute_sh_command(
-                c.ADB_SHELL_EXIT_FROM_SU.replace('REPLACE_EXIT',self.exitcommand),
+                c.ADB_SHELL_EXIT_FROM_SU.replace("REPLACE_EXIT", self.exitcommand),
                 **kwargs,
             )
             sleep(1)
@@ -3316,6 +4463,12 @@ class AdbControl(AdbControlBase):
         )
 
     @add_to_kwargs(v=(("su", True),))
+    def sh_disable_input_device(self, device, **kwargs):
+        return self.execute_sh_command(
+            c.ADB_SHELL_DISABLE_INPUT_DEVICE % device, **kwargs
+        )
+
+    @add_to_kwargs(v=(("su", True),))
     def sh_memory_dump(self, **kwargs):
         return self.execute_sh_command(c.ADB_SHELL_SYSTEM_MEMORY_DUMP, **kwargs)
 
@@ -3329,11 +4482,52 @@ class AdbControl(AdbControlBase):
     def sh_get_audio_playing_procs(self, **kwargs):
         return self.execute_sh_command(c.ADB_SHELL_GET_AUDIO_PLAYING_PROCS, **kwargs)
 
-
     def sh_get_procs_with_open_connections(self, **kwargs):
         return self.execute_sh_command(
             c.ADB_SHELL_PROCS_WITH_OPEN_CONNECTIONS, **kwargs
         )
+
+    @add_to_kwargs(v=(("su", True),))
+    def sh_force_idle(self, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_FORCE_IDLE, **kwargs)
+
+    @add_to_kwargs(v=(("su", True),))
+    def sh_unforce_idle(self, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_UNFORCE_IDLE, **kwargs)
+
+    @add_to_kwargs(v=(("su", True),))
+    def sh_nice(self, cmd, value=-19, **kwargs):
+        return self.execute_sh_command(
+            c.ADB_UIAUTOMATOR_NICE20 % (value, cmd), **kwargs
+        )
+
+    @add_to_kwargs(v=(("su", True),))
+    def sh_get_current_focus(self, **kwargs):
+        so, se = self.execute_sh_command(c.ADB_SHELL_CURRENT_FOCUS, **kwargs)
+        try:
+            return so[0].decode().strip()
+        except Exception as e:
+            sys.stderr.write(f"{e}")
+            sys.stderr.flush()
+
+    def sh_grep_proc_top(self, grep, **kwargs):
+        return self.execute_sh_command(
+            c.ADB_SHELL_TOP_ALL_PIDS_FROM_PROC_GREP .replace('REPLACEGREP',grep), **kwargs
+        )
+
+    def sh_am_i_su(self, **kwargs):
+        so, se = self.execute_sh_command(c.ADB_SHELL_AM_I_SU, **kwargs)
+        if so:
+            sostri = so[0].strip()
+            return True if sostri == b"True" else False
+
+    def sh_get_all_possible_activities(self, **kwargs):
+        input_data = b"".join(
+            self.execute_sh_command(c.ADB_SHELL_GET_ALL_POSSIBLE_ACTIVITIES, **kwargs)[
+                0
+            ][1:]
+        ).decode("utf-8")
+        return indent2dict(input_data, removespaces=True)
 
     @add_to_kwargs(v=(("su", True),))
     def sh_apps_using_internet(self, **kwargs):
@@ -3499,6 +4693,33 @@ class AdbControl(AdbControlBase):
     def adb_uinstall(self, package):
         return self.execute_adb_command(c.ADBEXE_UNINSTALL % package, withid=True)
 
+    def write(
+        self,
+        cmd,
+        wait_to_complete=0.1,
+        convert_to_83=False,
+        exitcommand="",
+        commandtimeout=0,
+    ):
+        try:
+            return super().write(
+                cmd,
+                wait_to_complete=wait_to_complete,
+                convert_to_83=convert_to_83,
+                exitcommand=exitcommand,
+                commandtimeout=commandtimeout,
+            )
+        except OSError:
+            self._reconnect_device()
+            return super().write(
+                cmd,
+                wait_to_complete=wait_to_complete,
+                convert_to_83=convert_to_83,
+                exitcommand=exitcommand,
+                commandtimeout=commandtimeout,
+            )
+            # raise e
+
     def _reconnect_device(self):
         subprocess.run(
             [self.adb_path, c.ADBEXE_CONNECT, self.device_serial], **invisibledict
@@ -3652,7 +4873,6 @@ class AdbControl(AdbControlBase):
         port = get_free_port()
 
         self.adb_forward_port(self, port, port)
-        # self.execute_adb_command(c.ADBEXE_FORWARD_PORT % (str(int(port)),str(int(port))),withid=True)
         so, se = self.execute_sh_command(
             f'cd {foldertodownload} && $(which busybox) nc -l -p {port} -e $(which busybox) tar -c . && echo "{self.exitcommand}"',
             wait_to_complete=0,
@@ -3762,3 +4982,16 @@ def get_file_rights(x):
     }
 
     return allfi
+
+
+@cache
+def get_comspec():
+    comspec = os.environ.get("ComSpec")
+    if not comspec:
+        system_root = os.environ.get("SystemRoot", "")
+        comspec = os.path.join(system_root, "System32", "cmd.exe")
+        if not os.path.isabs(comspec):
+            raise FileNotFoundError(
+                "shell not found: neither %ComSpec% nor %SystemRoot% is set"
+            )
+    return comspec

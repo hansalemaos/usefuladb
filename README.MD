@@ -36,9 +36,11 @@ AdbControl.connect_to_all_tcp_devices_windows(
 # - if you run "cd /sdcard/" and then another command "ls", for example, you will see the contents of /sdcard/.
 # - If you switch to su, you will remain in the superuser mode.
 # - Commands are not base64 encoded
+addr = "127.0.0.1:5675"
+
 blocking_shell = AdbControl(
     adb_path=r"C:\Android\android-sdk\platform-tools\adb.exe",
-    device_serial="127.0.0.1:5555",
+    device_serial=addr,
     use_busybox=False,  # uses busybox to decode base64
     connect_to_device=True,
     invisible=True,  # windows only - doesn't open a shell window, when you compile the code with nuitka, for example
@@ -66,7 +68,7 @@ blocking_shell = AdbControl(
 # - Note that 'su' is only valid for a single command.
 blocking_subshell = AdbControl(
     adb_path=r"C:\Android\android-sdk\platform-tools\adb.exe",
-    device_serial="127.0.0.1:5555",
+    device_serial=addr,
     use_busybox=False,  # Use busybox to decode base64 (if needed)
     connect_to_device=True,
     invisible=True,
@@ -96,7 +98,7 @@ blocking_subshell = AdbControl(
 
 nonblocking_subshell = AdbControl(
     adb_path=r"C:\Android\android-sdk\platform-tools\adb.exe",
-    device_serial="127.0.0.1:5555",
+    device_serial=addr,
     use_busybox=False,  # Use busybox to decode base64 (if needed)
     connect_to_device=True,
     invisible=True,
@@ -2004,6 +2006,122 @@ if executecmds:
     )
     size = blocking_shell.sh_calculate_size_of_folders("/sdcard/")
     # [(4, b'20231024/'), (8, b'AUTOMAT/'), (1045336, b'Android/'), (344, b'DCIM/'), (6460, b'Download/'), (100, b'Download2/'), (8, b'Download4/'), (96, b'Download9/'), (4, b'REPLACE_BINFOLDER/'), (16, b'a/'),
+    blocking_shell.sh_disable_input_device("/dev/input/event5")
+
+    blocking_shell.sh_list_dev_input()
+    for d in blocking_shell.sh_list_dev_input():
+        blocking_shell.sh_disable_input_device(d, su=True)
+
+    # self.execute_sh_command('getprop ro.secure ; /boot/android/android/system/xbin/bstk/su',su=True)
+    # self.execute_sh_command('getprop')
+
+    # self.execute_sh_command('setprop gsm.sim.operator.alpha O2')
+    # Out[8]: [[], []]
+    # self.execute_sh_command('getprop')
+    # self.execute_sh_command('getprop')
+    blocking_shell.sh_get_all_props()
+
+    # everything that can be passed to dumpsys
+    blocking_shell.sh_get_all_dumpsys_services()
+    # ['DockObserver',
+    #  'RTVboxMM',
+    #  'SurfaceFlinger',
+    #  'accessibility',
+    #  'account',
+    #  'activity',
+    #  'alarm',
+    #  'android.security.keystore',
+    #  'android.service.gatekeeper.IGateKeeperService',
+    #  'appops',
+    #  'appwidget',
+    #  'audio',
+    #  'autofill',
+    #  'backup',
+    #  'battery',
+
+    # separated in a list of lists
+    blocking_shell.sh_dumpsys_everything()
+    # checks if the activity accepts the parameter -h
+    blocking_shell.sh_get_all_extra_options_from_dumpsys()
+    # self.sh_get_all_extra_options_from_dumpsys()
+    # Out[5]:
+    # [['activity',
+    #   [[b'Total number of currently running services:0\n',
+    #     b'Activity manager dump options:\n',
+    #     b'  [-a] [-c] [-p PACKAGE] [-h] [WHAT] ...\n',
+    #     b'  WHAT may be one of:\n',
+    #     b'    a[ctivities]: activity stack state\n',
+    #     b'    r[recents]: recent activities state\n',
+    #     b'    b[roadcasts] [PACKAGE_NAME] [history [-s]]:
+
+    # Helps to avoid ERROR: could not get idle state
+    blocking_shell.sh_nice(
+        cmd="uiautomator dump",
+        value=-19,
+    )
+    # implemented here and fast lxml parsing:
+    df1 = blocking_shell.uiautomator_nice20(
+        timeout=60, nice=True, su=True, as_pandas=True
+    )
+    #       tag index text  ... height      ratio  NAF
+    # 2    node     0       ...    900   1.777778  NaN
+    # 3    node     0       ...    900   1.777778  NaN
+    # 4    node     0       ...    864   1.851852  NaN
+    # 5    node     0       ...    864   1.851852  NaN
+    # 6    node     0       ...    864   1.851852  NaN
+    # ..    ...   ...  ...  ...    ...        ...  ...
+    # 667  node     1       ...     72        1.0  NaN
+    # 668  node     5       ...     84   0.857143  NaN
+    # 669  node     6       ...     84   0.857143  NaN
+    # 670  node     0       ...     84   0.857143  NaN
+    # 671  node     1       ...     36  44.444444  NaN
+    # [670 rows x 32 columns]
+
+    df2 = blocking_shell.get_all_activity_elements(as_pandas=True)
+    # Out[9]:
+    #       START_X  START_Y  CENTER_X  ...  VIEW_INDEX  HIERACHY_CLUSTER  HIERACHY_SINGLE
+    # 0           0        0       800  ...           0                 1                0
+    # 1           0        0       800  ...           0                 1                1
+    # 2           0        0       800  ...           0                 1                2
+    # 3           0        0       800  ...           0                 1                3
+    # 4         714      333       799  ...           0                 1                4
+    #        ...      ...       ...  ...         ...               ...              ...
+    # 1297        0       36         0  ...           3                57                3
+    # 1298        0        0       800  ...           3                58                0
+    # 1299        0        0         0  ...           3                58                1
+    # 1300        0        0       800  ...           3                59                0
+    # 1301        0        0       800  ...           3                60                0
+    # [1302 rows x 40 columns]
+
+    blocking_subshell.sh_grep_proc_top("chrome",su=True)
+    blocking_shell.sh_force_idle()
+    blocking_subshell.sh_unforce_idle()
+    blocking_subshell.sh_get_current_focus()
+    blocking_subshell.sh_get_all_possible_activities()
+    # Out[6]:
+    # {'Activity Resolver Table:': {'Full MIME Types:': {'application/com.google.android.gms.car:': {'53d74a6 com.google.android.gms/.car.FirstActivity filter e95d41': {'Action: "android.nfc.action.NDEF_DISCOVERED"': 6,
+    #      'Category: "android.intent.category.DEFAULT"': 7,
+    #      'Type: "application/com.google.android.gms.car"': 8}},
+    #    'application/pkix-cert:': {'3196ee7 com.android.certinstaller/.CertInstallerMain filter acffff8': {'Action: "android.intent.action.VIEW"': 11,
+    #      'Category: "android.intent.category.DEFAULT"': 12,
+    #      'Type: "application/x-x509-ca-cert"': 13,
+    #      'Type: "application/x-x509-user-cert"': 14,
+    #      'Type: "application/x-x509-server-cert"': 15,
+    #      'Type: "application/x-pkcs12"': 16,
+    #      'Type: "application/application/x-pem-file"': 17,
+    #      'Type: "application/pkix-cert"': 18,
+
+
+    blocking_subshell.sh_am_i_su()
+    # Out[7]: True
+    blocking_subshell.sh_get_newest_file_in_folder_as_tar(
+        folder="/sdcard/Download/", file_filter="*", tarpath="/sdcard/newestar.tar.gz"
+    )
+    # Out[9]: [[b'./bet365 - Apostas Desportivas Online (3).mhtml\r\n'], []]
+    blocking_subshell.sh_delete_files_in_folder_older_than(
+        "/sdcard/Download/", "*.mhtml", "+1"
+    )
+
 
 
 ```
