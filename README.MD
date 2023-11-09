@@ -126,6 +126,7 @@ nonblocking_subshell = AdbControl(
 # - Commands are written to a txt file and executed from there.
 # - All commands are executed within a subshell using eval
 # - stdout/stderr are transfered via netcat
+# - Way faster than the other methods since it uses netcat
 eval_shell = AdbControl(
     adb_path=r"C:\Android\android-sdk\platform-tools\adb.exe",
     device_serial=addr,
@@ -2217,5 +2218,205 @@ if executecmds:
         "/sdcard/Download", "/sdcard/htmlstuff.txt", "*.mhtml"
     )
     print(flist)
+    self = eval_shell
+
+    print(blocking_subshell.sh_test_directory("/sdcard/"))
+    print(blocking_subshell.sh_test_exists_in_any_form("/sdcard/"))
+    print(blocking_subshell.sh_test_executable("/sdcard/"))
+    print(blocking_subshell.sh_test_regular_file("/sdcard/"))
+    print(blocking_subshell.sh_test_readable("/sdcard/"))
+    print(blocking_subshell.sh_test_named_pipe("/sdcard/"))
+    print(blocking_subshell.sh_test_block_device("/sdcard/"))
+    print(blocking_subshell.sh_test_character_device("/sdcard/"))
+    print(blocking_subshell.sh_test_link("/sdcard/"))
+    # True
+    # True
+    # True
+    # False
+    # True
+    # False
+    # False
+    # False
+    # False
+
+    # High speed webscraping - bet365 Football
+    htmlresults = eval_shell.sh_scrape_html(
+        file_path="/sdcard/Download/bet365 - Apostas Desportivas Online.mhtml",
+        mainblocks=[
+            "Fixture_Container"
+        ],  # parents blocks - regular expressions - need to be compatible with grep and re, which means that \s+, for example, is not allowed, and you have to use [0-9]+ instead of \d+
+        subblocks=['ParticipantOddsOnly_Odds">', 'FixtureDetailsTwoWay_TeamName +">'],
+    )  # child blocks - regular expressions - need to be compatible with grep and re, which means that \s+, for example, is not allowed , and you have to use [0-9]+ instead of \d+
+    htmlresultswfilter = [
+        k
+        for k in [
+            [
+                y.split(">", maxsplit=1)[1].split("<", maxsplit=1)[0]
+                for y in x
+                if y.startswith("FixtureDetailsTwoWay_TeamName")
+                or y.startswith("ParticipantOddsOnly_Odds")
+            ]
+            for x in htmlresults
+        ]
+        if k
+    ]
+    for x in htmlresultswfilter:
+        print(x)
+
+    # ['FC Astana', 'KF Ballkani', '2.25', '2.75', '3.75']
+    # ['Al Khaleej Saihat', 'Al Taee', '2.37', '2.62', '3.75']
+    # ['Al Raed', 'Al Shabab Riyadh', '1.80', '3.20', '4.75']
+    # ['Al Hidd', 'Sitra', '5.00', '3.75', '1.61']
+    # ['Al Shabab Manama', 'Al Hala', '2.05', '3.40', '3.40']
+    # ['Chernomorets Balchik', 'CSKA Sofia', '41.00', '13.00', '1.04']
+    # ["Stade d'Abidjan", 'CO Korhogo', '2.50', '2.40', '3.60']
+    # ['NK Nafta 1903', 'ND Ilirija Ljubljana', '1.44', '4.33', '6.50']
+    # ['Medeama SC', 'Nsoatreman FC', '2.20', '2.30', '5.00']
+    # ['Venomous Vipers', 'Pac Academy', '2.30', '2.30', '4.50']
+    # ['Naft Al-Wasat', 'Duhok', '2.15', '2.80', '3.50']
+    # ['Rimini', 'Perugia', '4.00', '3.25', '1.90']
+    # ['Al-Sailiya SC', 'Al-Shahaniya SC', '34.00', '19.00', '1.02']
+    # ['Lusail', 'Al Mesaimeer SC', '17.00', '5.00', '1.18']
+    # ['France (Musky) Esports', 'Portugal (Buconi) Esports', '1.083', '7.50', '19.00']
+    # ['Germany (Nicolas_Rage) Esports', 'Argentina (Izzy) Esports', '1.30', '4.00', '10.00']
+    # ['Man Utd (Adriano) Esports', 'Napoli (Iron) Esports', '1.20', '6.50', '8.50']
+    # ['RB Leipzig (Rafaelo) Esports', 'A.Madrid (Bruno) Esports', '1.72', '4.33', '3.75']
+    # ['Club Brugge (Danny) Esports', 'PAOK (Panic) Esports', '1.57', '4.50', '4.00']
+    # ['Fenerbahce (Magdy) Esports', 'Fiorentina (aibothard) Esports', '3.00', '4.00', '1.90']
+
+    # High speed webscraping - bet365 Tennis
+    htmlresults = eval_shell.sh_scrape_html(
+        file_path="/sdcard/Download/bet365 - Apostas Desportivas Online.mhtml",
+        mainblocks=["Fixture_Container"],
+        # parents blocks - regular expressions - need to be compatible with grep and re, which means that \s+, for example, is not allowed, and you have to use [0-9]+ instead of \d+
+        subblocks=[
+            'ParticipantOddsOnly_Odds">',
+            "ovm-FixtureDetailsWithIndicators_PlayingIndicator",
+        ],
+    )  # child blocks - regular expressions - need to be compatible with grep and re, which means that \s+, for example, is not allowed , and you have to use [0-9]+ instead of \d+
+    htmlresultswfilter = [
+        k
+        for k in [
+            [
+                y
+                for y in x
+                if "ovm-FixtureDetailsWithIndicators_PlayingIndicator" in y
+                   or y.startswith("ParticipantOddsOnly_Odds")
+            ]
+            for x in htmlresults
+        ]
+        if k
+    ]
+    for x in htmlresultswfilter:
+        print("-----------------------------------")
+        for y in x:
+            if y.startswith("ovm-FixtureDetailsWithIndicators_PlayingIndicator"):
+                try:
+                    z = y.split("</div>")[1]
+                    print(z)
+                except Exception:
+                    continue
+            elif y.startswith("ParticipantOddsOnly_Odds"):
+                try:
+                    z = y.split(">")[1].split("<")[0]
+                    print(z)
+                except Exception:
+                    continue
+
+    # -----------------------------------
+    # Leylah Fernandez
+    # Magda Linette
+    # 1.05
+    # 11.00
+    # -----------------------------------
+    # Viktorija Golubic
+    # Sofia Kenin
+    # 1.95
+    # 1.80
+    # -----------------------------------
+    # Fabio Fognini
+    # Lorenzo Sonego
+    # 1.12
+    # 6.00
+    # -----------------------------------
+    # Marton Fucsovics
+    # Pavel Kotov
+    # 2.00
+    # 1.80
+    # -----------------------------------
+    # Maria Lourdes Carle
+    # Varvara Lepchenko
+    # 1.14
+    # 5.00
+    # -----------------------------------
+    # Braden Shick
+    # Luciano Tacchi
+    # 8.50
+    # 1.05
+    # -----------------------------------
+    # Holden Koons
+    # Dhakshineswar Suresh
+    # 6.00
+    # 1.11
+    # -----------------------------------
+    # Pedro Rodenas
+    # Martin Borisiouk
+    # 1.05
+    # 8.50
+    # -----------------------------------
+    # Kennedy Shaffer
+    # Stefani Webb
+    # 1.75
+    # 2.00
+    # -----------------------------------
+    # Raquel G Vilar
+    # Gina Marie Dittmann
+    # 17.00
+    # 1.01
+    # -----------------------------------
+    # Saville/Tu
+    # Seggerman/Trhac
+    # 2.10
+    # 1.66
+    # -----------------------------------
+    # Alves/Riberio
+    # Carou/Ugo Carabelli
+    # 3.00
+    # 1.36
+    # -----------------------------------
+    # Karlovskiy/Serdarusic
+    # Sandgren/Willis
+    # 2.20
+    # 1.61
+    # -----------------------------------
+    # Muhammad/Santamaria
+    # Beck/Markham
+    # 2.10
+    # 1.66
+    # -----------------------------------
+    # Abduraimova/Monnet
+    # Chang/Kozyreva
+    # 2.50
+    # 1.50
+    # -----------------------------------
+    # Cigarran/Hess
+    # Rodriguez/Tenti
+    # 26.00
+    # 1.001
+    # -----------------------------------
+    # Urszula Radwanska
+    # Kira Pavlova
+    # 1.66
+    # 2.10
+    # -----------------------------------
+    # Katherine Sebov
+    # Dalayna Hewitt
+    # 1.66
+    # 2.10
+    # -----------------------------------
+    # Alexia Jacobs
+    # Liv Hovde
+    # 7.00
+    # 1.083
 
 ```
