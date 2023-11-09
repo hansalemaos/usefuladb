@@ -20,6 +20,7 @@ ADB_SHELL_GET_FILE_EXTENSION = """filename="FILEPATH"\necho \"${filename##*.}\""
 ADB_SHELL_REMOVE_STDERR_TMPFILES = (
     r"cd /sdcard/ && find . -type f -name 'xxxstd*' -exec rm {} \;"
 )
+ADB_SHELL_PASTE_DS ="paste -d '%s' -s %s"
 ADB_SHELL_REMOVE_STDOUT_TMPFILES = (
     r"cd /sdcard/ && find . -type f -name 'xxxxstd*' -exec rm {} \;"
 )
@@ -31,6 +32,13 @@ ADB_SHELL_REMOVE_STDOUT_TMPFILES_G = (
 )
 ADB_SHELL_GET_USER_ROTATION = "settings get system user_rotation"
 ADB_SHELL_CRATE_BACKUP = "cp %s{,.bak}"
+ADB_SHELL_COPY_DIR_RECURSIVE='cp -R %s %s'
+ADB_SHELL_REMOVE_FOLDER='rm -r -f %s'
+ADB_SHELL_WHOAMI='whoami'
+ADB_SHELL_ID='id'
+ADB_SHELL_USER_GROUPS='groups'
+ADB_SHELL_GET_FILETYPE='file %s'
+ADB_SHELL_COUNT_LINES_WORDS_CHARS='wc %s'
 ADB_SHELL_CHANGE_DICT = "cd %s"
 ADB_SHELL_LS = "ls"
 ADB_SHELL_EXIT_FROM_SU = f"""
@@ -229,10 +237,15 @@ ADB_SHELL_PM_LIST_PACKAGES_3 = "pm list packages -3"
 ADB_SHELL_PM_LIST_PACKAGES_S = "pm list packages -s"
 ADB_SHELL_MOUNT = "mount"
 ADB_SHELL_CAT = "cat %s"
+ADB_SHELL_DISABLE_NETWORK_INTERFACE='ifconfig %s down &'
+ADB_SHELL_ENABLE_NETWORK_INTERFACE='ifconfig %s up &'
+ADB_SHELL_LINUX_VERSION='uname -a'
+ADB_SHELL_CPU_INFO='cat /proc/cpuinfo'
+ADB_SHELL_MEM_INFO='cat /proc/meminfo'
 ADB_SHELL_SCREENCAP = "screencap -p"
 ADB_SHELL_SCREENCAPRAW = "screencap"
 ADB_SHELL_REMOUNT_ALL_RW = "mount -o remount,rw /"
-ADB_SHELL_REMOUNT_ALL_RO = "mount -o remount,rw /"
+ADB_SHELL_REMOUNT_ALL_RO = "mount -o remount,ro /"
 ADB_SHELL_REMOVE_DATA_CACHE = r"mount -o remount,rw /; rm -r -f /data/cache"
 ADB_SHELL_REMOVE_DALVIK_CACHE = r"mount -o remount,rw /; rm -r -f /data/dalvik-cache"
 ADB_SHELL_REMOVE_USER_CACHE = r'mount -o remount,rw /; for cache in /data/user*/*/*/cache/*; do rm -rf "$cache"; done'
@@ -1320,7 +1333,10 @@ ADB_SHELL_NUMBER_OF_CPUS = """grep "processor" /proc/cpuinfo | wc -l"""
 ADB_SHELL_GET_INTERNAL_IPS = R"""ifconfig $devices | grep "inet addr" | sed 's/.*inet addr:\([0-9\.]*\).*/\1/g'"""
 ADB_SHELL_GET_EXTERNAL_IP = """wget -qO- ifconfig.me/ip"""
 ADB_SHELL_GET_EXTERNAL_IP2 = "wget -O - -q icanhazip.com"
-
+ADB_SHELL_TAIL_BYTES  = 'tail -c %s %s'
+ADB_SHELL_TAIL_LINES  = 'tail -n %s %s'
+ADB_SHELL_HEAD_BYTES  = 'head -c %s %s'
+ADB_SHELL_HEAD_LINES  = 'head -n %s %s'
 ADB_SHELL_GET_ALL_MAC_ADDRESSES = (
     R"""ifconfig -a| grep -o -E '([[:xdigit:]]{1,2}:){5}[[:xdigit:]]{1,2}'"""
 )
@@ -1683,6 +1699,19 @@ for proc_path in /proc/*/cwd; do
     echo "$pid - $cwd"
 done
 """
+ADB_SHELL_JOBS='jobs'
+ADB_SHELL_JOBS_P='jobs -p'
+
+ADB_SHELL_REBOOT='reboot'
+ADB_SHELL_SHOW_USED_DISKSPACE='df'
+ADB_SHELL_SHOW_USED_MEMORY='free'
+ADB_SHELL_SORT_FILE_REVERSE='sort -r %s'
+ADB_SHELL_SORT_FILE='sort %s'
+ADB_SHELL_CHMOD_X='chmod u+x,g+x,o+x %s'
+ADB_SHELL_EXECUTE_SH_SCRIPT='sh %s'
+ADB_SHELL_WHICH_A='which -a %s'
+ADB_SHELL_TYPE= 'type %s'
+ADB_SHELL_CREATE_SYMBOLIC_LINK='ln -s -f %s %s'
 ADB_SHELL_LS_FULL_PATH = """REPLACE_PATH\nls | sed s#^#$(pwd)/#"""
 ADB_SHELL_LS_SORT_BY_MOD_DATE = (
     """REPLACE_PATHfind -type f -print0 | xargs -r0 stat -c %y\\ %n | sort"""
@@ -1787,6 +1816,7 @@ check_if_finished_writing(){{
         }}
         """
 
+ADB_SHELL_CREATE_DATE_SORTED_FILE_LIST = R'cd %s && find %s -type f -print0 | xargs -0 stat -c %%Y\&%%n | sort >%s && cat %s'
 ADB_SHELL_GET_ALL_ACTIVITY_ELEMENTS='dumpsys activity top -a -c --checkin'
 ADB_UIAUTOMATOR_NICE20 = """nice -n %s %s"""
 ADB_SHELL_FORCE_IDLE="""

@@ -60,6 +60,7 @@ blocking_shell = AdbControl(
     global_cmd=True,  # global, because variables/su status/dirs stay
     global_cmd_timeout=10,  # if a command doesn't return stderr/stdout in a given time
 )
+
 # Blocking Subshell
 # - Waits until stderr/stdout have finished processing.
 # - Commands are base64 encoded.
@@ -120,6 +121,34 @@ nonblocking_subshell = AdbControl(
     global_cmd_timeout=5,
 )
 
+# Added 9.11.2023 - Eval Shell
+# - Waits until stderr/stdout have finished processing unless there is a timeout
+# - Commands are written to a txt file and executed from there.
+# - All commands are executed within a subshell using eval
+# - stdout/stderr are transfered via netcat
+eval_shell = AdbControl(
+    adb_path=r"C:\Android\android-sdk\platform-tools\adb.exe",
+    device_serial=addr,
+    use_busybox=False,
+    connect_to_device=True,
+    invisible=True,
+    print_stdout=True,
+    print_stderr=True,
+    limit_stdout=3,
+    limit_stderr=3,  # limits the history of shellcommands - can be checked at blocking_shell.stderr
+    limit_stdin=None,
+    convert_to_83=True,
+    wait_to_complete=0,
+    flush_stdout_before=True,
+    flush_stdin_before=True,
+    flush_stderr_before=True,
+    exitcommand="xxxCOMMANDxxxDONExxx",
+    capture_stdout_stderr_first=True,
+    global_cmd=True,
+    global_cmd_timeout=10,
+    use_eval=True,  # executes commands using eval
+    eval_timeout=10,  # timeout for eval (netcat transfer)
+)
 executecmds = False
 if executecmds:
     # The AdbControl module stays connected to an adb instance throughout its usage.
@@ -2093,7 +2122,7 @@ if executecmds:
     # 1301        0        0       800  ...           3                60                0
     # [1302 rows x 40 columns]
 
-    blocking_subshell.sh_grep_proc_top("chrome",su=True)
+    blocking_subshell.sh_grep_proc_top("chrome", su=True)
     blocking_shell.sh_force_idle()
     blocking_subshell.sh_unforce_idle()
     blocking_subshell.sh_get_current_focus()
@@ -2111,7 +2140,6 @@ if executecmds:
     #      'Type: "application/application/x-pem-file"': 17,
     #      'Type: "application/pkix-cert"': 18,
 
-
     blocking_subshell.sh_am_i_su()
     # Out[7]: True
     blocking_subshell.sh_get_newest_file_in_folder_as_tar(
@@ -2122,6 +2150,72 @@ if executecmds:
         "/sdcard/Download/", "*.mhtml", "+1"
     )
 
+    alla = blocking_subshell.get_all_activity_elements(
+        as_pandas=False,
+    )
+    alla = blocking_subshell.sh_get_all_possible_activities()
+    blocking_subshell.sh_copy_dir_recursive("/sdcard/Download/", "/sdcard/Download3")
+    blocking_subshell.sh_remove_folder("/sdcard/Download3")
+    coli = blocking_subshell.sh_number_of_lines_words_chars_in_file(
+        file="/sdcard/Download/bet365 - Apostas Desportivas Online (96).mhtml"
+    )
+    print(coli)
+    blocking_subshell.sh_tail_bytes(
+        n=10, file="/sdcard/Download/bet365 - Apostas Desportivas Online (96).mhtml"
+    )
+    blocking_subshell.sh_tail_lines(
+        n=10, file="/sdcard/Download/bet365 - Apostas Desportivas Online (96).mhtml"
+    )
+    blocking_subshell.sh_head_bytes(
+        n=10, file="/sdcard/Download/bet365 - Apostas Desportivas Online (96).mhtml"
+    )
+    blocking_subshell.sh_head_lines(
+        n=10, file="/sdcard/Download/bet365 - Apostas Desportivas Online (96).mhtml"
+    )
+    blocking_subshell.sh_sort_file_reverse(
+        "/sdcard/Download/bet365 - Apostas Desportivas Online (96).mhtml"
+    )
+    blocking_subshell.sh_sort_file(
+        "/sdcard/Download/bet365 - Apostas Desportivas Online (96).mhtml"
+    )
+    blocking_subshell.sh_create_file_with_content("ls", "/sdcard/tttt.sh")
+    blocking_subshell.sh_chmod_x("/sdcard/tttt.sh")
+    blocking_subshell.sh_execute_sh_script("/sdcard/tttt.sh")
+    blocking_subshell.sh_type("ls")
+    # Out[4]: [[b'ls is a tracked alias for /system/bin/ls\n'], []]
+    blocking_subshell.sh_which_a("ls")
+    # Out[3]: [[b'/system/bin/ls\n', b'/system/xbin/ls\n', b'/vendor/bin/ls\n'], []]
+    blocking_subshell.sh_create_symbolic_link(
+        "/sdcard/tttt.sh", "/data/ttttex.sh"
+    )  # not possible on sdcard
+    blocking_subshell.sh_execute_sh_script("/data/ttttex.sh")
+    blocking_subshell.sh_show_used_diskspace()
+    blocking_subshell.sh_show_used_memory()
+    blocking_subshell.sh_reboot()  # shutdown - emulator
+    blocking_subshell.execute_sh_command("sleep 90 &")
+    blocking_subshell.sh_jobs()
+    blocking_subshell.sh_remount_all_rw()
 
+    # Out[3]: [[4308, b'[1] + Running              \\sleep 90']]
+
+    blocking_subshell.sh_disable_network_adapter("eth0")  # kicks adb connection
+    blocking_subshell.sh_enable_network_adapter("eth0")
+    blocking_subshell.sh_get_linux_version()
+    blocking_subshell.sh_get_cpu_info()
+    blocking_subshell.sh_get_mem_info()
+    blocking_subshell.sh_whoami()
+    blocking_subshell.sh_whoami(su=True)
+    blocking_subshell.sh_id()
+    blocking_subshell.sh_get_user_groups()
+    blocking_subshell.sh_paste(
+        file="/sdcard/Download/bet365 - Apostas Desportivas Online (96).mhtml",
+        delimiter=" ",
+    )
+
+    # get sorted file list (by modification date)
+    flist = blocking_subshell.sh_create_date_sorted_filelist(
+        "/sdcard/Download", "/sdcard/htmlstuff.txt", "*.mhtml"
+    )
+    print(flist)
 
 ```

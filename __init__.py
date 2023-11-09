@@ -13,6 +13,8 @@ import time
 from collections import namedtuple, defaultdict
 from copy import deepcopy
 from functools import partial, wraps
+
+import nclib
 import requests
 from flatten_any_dict_iterable_or_whatsoever import fla_tu
 from indent2dict import indent2dict
@@ -25,7 +27,18 @@ from normaltext import lookup
 from typing import Literal
 from punktdict import PunktDict as PunktDict_
 from punktdict import dictconfig
-
+import ctypes
+import itertools
+import os
+import platform
+import signal
+import sys
+import subprocess
+import threading
+from collections import deque
+from time import sleep as sleep_
+from math import floor
+from functools import cache
 numberreg = re.compile(r"\[([^,]+),([^,]+)\]\[([^,]+),([^,]+)\]", flags=re.I)
 
 CREATE_NEW_PROCESS_GROUP = 0x00000200
@@ -121,19 +134,7 @@ valid_input_devices = Literal[
     "trackball",
     "",
 ]
-import ctypes
-import itertools
-import os
-import platform
-import signal
-import sys
-import subprocess
-import threading
-from collections import deque
-import re
-from time import sleep as sleep_
-from math import floor
-from functools import cache
+
 
 compiledregex = re.compile(r"^[A-Z]:\\", flags=re.I)
 
@@ -823,6 +824,8 @@ class AdbControlBase(SubProcInputOutput):
         capture_stdout_stderr_first=True,
         global_cmd=True,
         global_cmd_timeout=15,
+        use_eval=False,
+        eval_timeout=30,
     ):
         self.su = su
         self.use_busybox = use_busybox
@@ -869,6 +872,8 @@ class AdbControlBase(SubProcInputOutput):
         )
         self.global_cmd = global_cmd
         self.global_cmd_timeout = global_cmd_timeout
+        self.use_eval = use_eval
+        self.eval_timeout = eval_timeout
         if connect_to_device:
             subprocess.run([self.adb_path, "connect", device_serial], **invisibledict)
         super().__init__(
@@ -1027,6 +1032,77 @@ class AdbControlBase(SubProcInputOutput):
             )
         return [dataout, dataerr]
 
+    def execute_sh_command_eval(self, command, timeout=10, **kwargs):
+        if not isinstance(command, bytes):
+            command = command.encode()
+        eni = base64.standard_b64encode(command).decode("utf-8", "strict")
+        path = "/sdcard/XXXXtmpcmd.txt"
+        enicmd = f"base64 -d <<< $(echo -n {eni}) > {path}\n".encode()
+        self.p.stdin.write(enicmd)
+        self.p.stdin.flush()
+        stdout = "/sdcard/outputfilexxxstdout.txt"
+        stderr = "/sdcard/outputfilexxxstderr.txt"
+        freeport = get_free_port()
+        su = kwargs.get("su", self.su)
+        if su:
+            linetoadd = f'''eval "cat {path} | su -c 'sh 2> {stderr} 1> {stdout}'"'''
+        else:
+            linetoadd = f'''eval "cat {path} | sh 2> {stderr} 1> {stdout}"'''
+
+        enicmd2 = f"""
+startpro(){{
+{linetoadd}
+echo -e -n "XXXXENDSTDOUTXXXX" >> {stdout}
+echo -e -n "XXXXENDSTDERRXXXX" >> {stderr}
+cat  {stdout} {stderr} | busybox nc -w {timeout} -l -p {freeport}
+rm -f {stderr}
+rm -f {stdout}
+rm -f {path}
+}}
+startpro 2> /dev/null
+\n""".encode()
+        self.p.stdin.write(enicmd2)
+        self.p.stdin.flush()
+        p1 = subprocess.run(
+            f"{self.adbpath} -s {self.device_serial} forward tcp:{freeport} tcp:{freeport}",
+            capture_output=True,
+            **invisibledict,
+        )
+        # print(p1.stdout)
+        # print(p1.stderr)
+
+        r = b""
+        timeoutfinal = time.time() + timeout
+
+        while time.time() < timeoutfinal:
+            try:
+                nc = nclib.Netcat(connect=("localhost", freeport))
+
+                r = nc.read_all(timeout=timeout)
+                if r:
+                    break
+            except Exception as fe:
+                print(fe)
+                # continue
+                try:
+                    nc.close()
+                except Exception as fa:
+                    print(fa)
+        p2 = subprocess.run(
+            f"{self.adbpath} -s {self.device_serial} forward --remove tcp:{freeport}",
+            capture_output=True,
+            **invisibledict,
+        )
+        # print(p2.stdout)
+        # print(p2.stderr)
+        stdout, stderr = b"", b""
+        try:
+            stdout, stderr = r.split(b"XXXXENDSTDOUTXXXX")
+            stderr = stderr.split(b"XXXXENDSTDERRXXXX")[0]
+        except Exception:
+            pass
+        return [stdout.splitlines(keepends=True), stderr.splitlines(keepends=True)]
+
     def execute_sh_command(self, cmd, **kwargs):
         self._correct_newlines = True
         if isinstance(cmd, str):
@@ -1040,6 +1116,12 @@ class AdbControlBase(SubProcInputOutput):
             except Exception as fe:
                 sys.stderr.write(f"{fe}\n")
                 sys.stderr.flush()
+
+        evalcmd = kwargs.get("use_eval", self.use_eval)
+
+        if evalcmd:
+            tout = kwargs.get("eval_timeout", kwargs.get("timeout", self.eval_timeout))
+            return self.execute_sh_command_eval(cmd, timeout=tout, **kwargs)
 
         global_cmd = kwargs.get("global_cmd", self.global_cmd)
         if global_cmd:
@@ -1486,6 +1568,8 @@ class AdbControl(AdbControlBase):
         capture_stdout_stderr_first=True,
         global_cmd=False,
         global_cmd_timeout=5,
+        use_eval=False,
+        eval_timeout=30,
     ):
         super().__init__(
             adb_path,
@@ -1507,6 +1591,8 @@ class AdbControl(AdbControlBase):
             capture_stdout_stderr_first=capture_stdout_stderr_first,
             global_cmd=global_cmd,
             global_cmd_timeout=global_cmd_timeout,
+            use_eval=use_eval,
+            eval_timeout=eval_timeout,
         )
         self.keyevents = PunktDict(key_events)
 
@@ -1535,6 +1621,65 @@ class AdbControl(AdbControlBase):
         if so:
             return so[0].strip().decode()
 
+    @change_args_kwargs(args_and_function=(("file", _escape_filepath),))
+    def sh_copy_dir_recursive(self, src, dst, **kwargs):
+        return self.execute_sh_command(
+            c.ADB_SHELL_COPY_DIR_RECURSIVE % (src, dst), **kwargs
+        )
+
+    @change_args_kwargs(args_and_function=(("file", _escape_filepath),))
+    def sh_paste(self, file, delimiter=" ", **kwargs):
+        return self.execute_sh_command(
+            c.ADB_SHELL_PASTE_DS % (delimiter, file), **kwargs
+        )
+
+    @change_args_kwargs(args_and_function=(("file", _escape_filepath),))
+    def sh_tail_bytes(self, n, file, **kwargs):
+        return self.execute_sh_command(
+            c.ADB_SHELL_TAIL_BYTES % (int(n), file), **kwargs
+        )
+
+    @change_args_kwargs(args_and_function=(("file", _escape_filepath),))
+    def sh_tail_lines(self, n, file, **kwargs):
+        return self.execute_sh_command(
+            c.ADB_SHELL_TAIL_LINES % (int(n), file), **kwargs
+        )
+
+    @change_args_kwargs(args_and_function=(("file", _escape_filepath),))
+    def sh_head_bytes(self, n, file, **kwargs):
+        return self.execute_sh_command(
+            c.ADB_SHELL_HEAD_BYTES % (int(n), file), **kwargs
+        )
+
+    @change_args_kwargs(args_and_function=(("file", _escape_filepath),))
+    def sh_head_lines(self, n, file, **kwargs):
+        return self.execute_sh_command(
+            c.ADB_SHELL_HEAD_LINES % (int(n), file), **kwargs
+        )
+
+    @change_args_kwargs(args_and_function=(("folder", _escape_filepath),))
+    def sh_remove_folder(self, folder, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_REMOVE_FOLDER % (folder,), **kwargs)
+
+    @change_args_kwargs(args_and_function=(("file", _escape_filepath),))
+    def sh_number_of_lines_words_chars_in_file(self, file, **kwargs):
+        try:
+            return list(
+                map(
+                    int,
+                    self.execute_sh_command(
+                        c.ADB_SHELL_COUNT_LINES_WORDS_CHARS % file, **kwargs
+                    )[0][0]
+                    .strip()
+                    .split(maxsplit=3)[:3],
+                )
+            )
+        except Exception as e:
+            sys.stderr.write(f"{e}")
+            sys.stderr.flush()
+        return []
+
+    @change_args_kwargs(args_and_function=(("file", _escape_filepath),))
     def sh_create_bak_of_file(self, file, **kwargs):
         return self.execute_sh_command(c.ADB_SHELL_CRATE_BACKUP % file, **kwargs)
 
@@ -2407,7 +2552,15 @@ class AdbControl(AdbControlBase):
 
     @add_to_kwargs(v=(("su", True),))
     def sh_remount_all_rw(self, **kwargs):
-        return self.execute_sh_command(c.ADB_SHELL_REMOUNT_ALL_RW, **kwargs)
+        self.execute_sh_command(c.ADB_SHELL_REMOUNT_ALL_RW, **kwargs)
+        cmd2 = c.ADB_SHELL_REMOUNT_ALL_RW.rstrip(" /")
+        return [
+            self.execute_sh_command(f"{cmd2} {y[0]} {y[2]}", **kwargs)
+            for y in [
+                x.decode("utf-8").split(maxsplit=3)
+                for x in self.execute_sh_command(c.ADB_SHELL_MOUNT, **kwargs)[0]
+            ]
+        ]
 
     @add_to_kwargs(v=(("su", True),))
     def sh_remount_all_ro(self, **kwargs):
@@ -2542,6 +2695,21 @@ class AdbControl(AdbControlBase):
 
     def sh_clear_package(self, package, **kwargs):
         return self.execute_sh_command(c.ADB_SHELL_CLEAR_PACKAGE % package, **kwargs)
+
+    @change_args_kwargs(
+        args_and_function=(
+            ("folder", _escape_filepath),
+            ("outputfile", _escape_filepath),
+        )
+    )
+    def sh_create_date_sorted_filelist(
+        self, folder, outputfile, filefilter="*", **kwargs
+    ):
+        return self.execute_sh_command(
+            c.ADB_SHELL_CREATE_DATE_SORTED_FILE_LIST
+            % (folder, filefilter, outputfile, outputfile),
+            **kwargs,
+        )
 
     @change_args_kwargs(args_and_function=(("path", _escape_filepath),))
     def sh_remove_file(self, path, **kwargs):
@@ -2805,6 +2973,16 @@ class AdbControl(AdbControlBase):
             c.ADB_SHELL_SWIPE % (int(x0), int(y0), int(x1), int(y1), int(t * 1000)),
             **kwargs,
         )
+
+    @change_args_kwargs(args_and_function=(("file", _escape_filepath),))
+    def sh_sort_file_reverse(self, file, **kwargs):
+        return self.execute_sh_command(
+            c.ADB_SHELL_SORT_FILE_REVERSE % (file,), **kwargs
+        )
+
+    @change_args_kwargs(args_and_function=(("file", _escape_filepath),))
+    def sh_sort_file(self, file, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_SORT_FILE % (file,), **kwargs)
 
     def sh_file_exists(self, path, **kwargs):
         stdout, stderr = self.execute_sh_command(
@@ -4122,6 +4300,59 @@ class AdbControl(AdbControlBase):
                 sys.stderr.flush()
         return itemsdictfinal
 
+    @add_to_kwargs(
+        v=(
+            ("su", True),
+            ("global_cmd", False),
+            ("wait_to_complete", 0),
+            ("capture_stdout_stderr_first", False),
+        )
+    )
+    def sh_disable_network_adapter(self, network, **kwargs):
+        return self.execute_sh_command(
+            c.ADB_SHELL_DISABLE_NETWORK_INTERFACE % network, **kwargs
+        )
+
+    def sh_get_linux_version(self, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_LINUX_VERSION, **kwargs)
+
+    def sh_get_cpu_info(self, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_CPU_INFO, **kwargs)
+
+    def sh_get_mem_info(self, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_MEM_INFO, **kwargs)
+
+    def sh_whoami(self, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_WHOAMI, **kwargs)
+
+    def sh_id(self, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_ID, **kwargs)
+
+    def sh_get_user_groups(self, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_USER_GROUPS, **kwargs)
+
+    @change_args_kwargs(args_and_function=(("file", _escape_filepath),))
+    def sh_get_filetype(self, file, **kwargs):
+        return (
+            self.execute_sh_command(c.ADB_SHELL_GET_FILETYPE % file, **kwargs)[0][0]
+            .rsplit(b":", 1)[-1]
+            .strip()
+            .decode()
+        )
+
+    @add_to_kwargs(
+        v=(
+            ("su", True),
+            ("global_cmd", False),
+            ("wait_to_complete", 0),
+            ("capture_stdout_stderr_first", False),
+        )
+    )
+    def sh_enable_network_adapter(self, network, **kwargs):
+        return self.execute_sh_command(
+            c.ADB_SHELL_ENABLE_NETWORK_INTERFACE % network, **kwargs
+        )
+
     @add_to_kwargs(v=(("su", True), ("print_stdout", False), ("wait_to_complete", 0)))
     def _sh_dump_db_files(self, command, as_pandas=False, **kwargs):
         dbfiles = self.execute_sh_command(command, **kwargs)
@@ -4512,7 +4743,8 @@ class AdbControl(AdbControlBase):
 
     def sh_grep_proc_top(self, grep, **kwargs):
         return self.execute_sh_command(
-            c.ADB_SHELL_TOP_ALL_PIDS_FROM_PROC_GREP .replace('REPLACEGREP',grep), **kwargs
+            c.ADB_SHELL_TOP_ALL_PIDS_FROM_PROC_GREP.replace("REPLACEGREP", grep),
+            **kwargs,
         )
 
     def sh_am_i_su(self, **kwargs):
@@ -4532,6 +4764,50 @@ class AdbControl(AdbControlBase):
     @add_to_kwargs(v=(("su", True),))
     def sh_apps_using_internet(self, **kwargs):
         return self.execute_sh_command(c.ADB_SHELL_APPS_USING_INTERNET, **kwargs)
+
+    @change_args_kwargs(args_and_function=(("file", _escape_filepath),))
+    @add_to_kwargs(v=(("su", True),))
+    def sh_chmod_x(self, file, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_CHMOD_X % file, **kwargs)
+
+    @change_args_kwargs(args_and_function=(("file", _escape_filepath),))
+    def sh_execute_sh_script(self, file, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_EXECUTE_SH_SCRIPT % file, **kwargs)
+
+    def sh_which_a(self, file, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_WHICH_A % file, **kwargs)
+
+    def sh_type(self, file, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_TYPE % file, **kwargs)
+
+    @change_args_kwargs(
+        args_and_function=(("src", _escape_filepath), ("dst", _escape_filepath))
+    )
+    @add_to_kwargs(v=(("su", True),))
+    def sh_create_symbolic_link(self, src, dst, **kwargs):
+        return self.execute_sh_command(
+            c.ADB_SHELL_CREATE_SYMBOLIC_LINK % (src, dst), **kwargs
+        )
+
+    def sh_show_used_diskspace(self, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_SHOW_USED_DISKSPACE, **kwargs)
+
+    def sh_show_used_memory(self, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_SHOW_USED_MEMORY, **kwargs)
+
+    def sh_reboot(self, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_REBOOT, **kwargs)
+
+    def sh_jobs(self, **kwargs):
+        return [
+            [int(u[0].strip()), (u[1].strip())]
+            for u in (
+                zip(
+                    self.execute_sh_command(c.ADB_SHELL_JOBS_P, **kwargs)[0],
+                    self.execute_sh_command(c.ADB_SHELL_JOBS, **kwargs)[0],
+                )
+            )
+        ]
 
     def sh_goto_next_sibling_folder(self, **kwargs):
         so, se = self.execute_sh_command(c.ADB_SHELL_GOTO_NEXT_SIBLING_FOLDER, **kwargs)

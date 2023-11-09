@@ -4,6 +4,7 @@ flatten_any_dict_iterable_or_whatsoever
 flatten_everything
 indent2dict
 lxml
+nclib
 normaltext
 parifinder
 punktdict
