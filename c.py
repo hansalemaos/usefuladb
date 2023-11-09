@@ -1864,3 +1864,58 @@ get_newest_file_in_folder_as_tar() {
 
 get_newest_file_in_folder_as_tar REPLACEFOLDER "REPLACEFILEFILTER" "REPLACETARPATH"
 """
+
+ADB_SHELL_TEST_DIRECTORY = '''
+    if test -d %s; then
+        echo 1
+    else
+        echo 0
+    fi'''
+ADB_SHELL_TEST_EXISTS_IN_ANY_FORM = '''
+    if test -e %s; then
+        echo 1
+    else
+        echo 0
+    fi'''
+ADB_SHELL_TEST_EXECUTABLE = '''
+    if test -x %s; then
+        echo 1
+    else
+        echo 0
+    fi'''
+ADB_SHELL_TEST_REGULAR_FILE = '''
+    if test -f %s; then
+        echo 1
+    else
+        echo 0
+    fi'''
+ADB_SHELL_TEST_READABLE = '''
+    if test -r %s; then
+        echo 1
+    else
+        echo 0
+    fi'''
+ADB_SHELL_TEST_NAMED_PIPE = '''
+    if test -p %s; then
+        echo 1
+    else
+        echo 0
+    fi'''
+ADB_SHELL_TEST_BLOCK_DEVICE = '''
+    if test -b %s; then
+        echo 1
+    else
+        echo 0
+    fi'''
+ADB_SHELL_TEST_CHARACTER_DEVICE = '''
+    if test -c %s; then
+        echo 1
+    else
+        echo 0
+    fi'''
+ADB_SHELL_TEST_CHARACTER_LINK = '''
+    if test -h %s; then
+        echo 1
+    else
+        echo 0
+    fi'''

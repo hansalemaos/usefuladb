@@ -4647,6 +4647,52 @@ class AdbControl(AdbControlBase):
         if so:
             return so[0].strip().decode()
 
+    def sh_test_directory(self, path, **kwargs):
+        return bool(int(self.execute_sh_command(c.ADB_SHELL_TEST_DIRECTORY % path, **kwargs)[0][0].strip()))
+
+    def sh_test_exists_in_any_form(self, path, **kwargs):
+        return bool(int(self.execute_sh_command(c.ADB_SHELL_TEST_EXISTS_IN_ANY_FORM % path, **kwargs)[0][0].strip()))
+
+    def sh_test_executable(self, path, **kwargs):
+        return bool(int(self.execute_sh_command(c.ADB_SHELL_TEST_EXECUTABLE % path, **kwargs)[0][0].strip()))
+
+    def sh_test_regular_file(self, path, **kwargs):
+        return bool(int(self.execute_sh_command(c.ADB_SHELL_TEST_REGULAR_FILE % path, **kwargs)[0][0].strip()))
+
+    def sh_test_readable(self, path, **kwargs):
+        return bool(int(self.execute_sh_command(c.ADB_SHELL_TEST_READABLE % path, **kwargs)[0][0].strip()))
+
+    def sh_test_named_pipe(self, path, **kwargs):
+        return bool(int(self.execute_sh_command(c.ADB_SHELL_TEST_NAMED_PIPE % path, **kwargs)[0][0].strip()))
+
+    def sh_test_block_device(self, path, **kwargs):
+        return bool(int(self.execute_sh_command(c.ADB_SHELL_TEST_BLOCK_DEVICE % path, **kwargs)[0][0].strip()))
+
+    def sh_test_character_device(self, path, **kwargs):
+        return bool(int(self.execute_sh_command(c.ADB_SHELL_TEST_CHARACTER_DEVICE % path, **kwargs)[0][0].strip()))
+
+    def sh_test_link(self, path, **kwargs):
+        return bool(int(self.execute_sh_command(c.ADB_SHELL_TEST_CHARACTER_LINK % path, **kwargs)[0][0].strip()))
+
+
+    def sh_scrape_html(self,file_path,mainblocks,subblocks,**kwargs):
+        try:
+            cmd = ('cat %s | sed -r \'s/(' % strip_quotes_and_escape(file_path) + (
+                q := "|".join([h for h in mainblocks])) + f')/\\n\\1/g\' | grep -E \'({q})\' | sed -r \'s/(' + "|".join(
+                [h for h in subblocks]) + ')/\\n\\1/g\' | grep -E ' '\'(' + "|".join([h for h in subblocks + mainblocks]) + ')\'')
+            so, se = self.execute_sh_command(cmd,**kwargs)
+            decoded = b''.join(so).decode('utf-8', 'backslashreplace').strip()
+            r = [v.start() for v in (re.finditer('(' + "|".join([h for h in mainblocks]) + ')', decoded))]
+            b2 = '(' + "|".join([h for h in subblocks + mainblocks]) + ')'
+            result1 = list_split(l=decoded, indices_or_sections=r)
+            result2 = [[j for j in q if j] for q in
+                       [list_split(l=ri, indices_or_sections=[y.start() for y in re.finditer(b2, ri)]) for ri in result1 if ri]]
+            return result2
+        except Exception as fe:
+            sys.stderr.write(f'{fe}')
+            sys.stderr.flush()
+            return []
+
     def sh_cd_and_search_string_in_files(self, path, query, **kwargs):
         path = strip_quotes_and_escape(path)
 
