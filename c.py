@@ -180,7 +180,12 @@ getmemdump() {
         done
     )
 }
-getmemdump"""
+oldIFS=$IFS
+getmemdump 
+IFS=$oldIFS
+
+"""
+
     + "\n\n"
 )
 
@@ -360,12 +365,15 @@ screen_height=%s
 allrgbresults=()
 x_coordinate=%s
 y_coordinate=%s
+oldIFS=$IFS
 while true; do
   get_rgb_value_at_coords $x_coordinate $y_coordinate "$screen_width" allrgbresults
   echo "${allrgbresults[0]},${allrgbresults[1]},${allrgbresults[2]},${allrgbresults[3]},${allrgbresults[4]}"
   unset allrgbresults
   break
-done"""
+done
+IFS=$oldIFS
+"""
 
 
 activityelementsbasic = r"""
@@ -918,8 +926,10 @@ execute_all() {
         done
     done
 }
-ADD_TO_SCRIPT_REPLACE
 
+IFS=$oldIFS
+ADD_TO_SCRIPT_REPLACE
+oldIFS=$IFS
 """
 
 
@@ -1109,7 +1119,10 @@ parse_uiautomator() {
         fi
     done <<<"$file_contents"
 }
+
+oldIFS=$IFS 
 ADD_TO_SCRIPT_REPLACE
+IFS=$oldIFS
 """
 
 compare2files = """
@@ -1118,11 +1131,12 @@ splitlines_file(){
 local -n oarra="$1"
 filex=$2
 file_contentscx=$(<"$filex")
+oldIFS=$IFS 
 while IFS= read -r line; do
     oarra+=("$line")
 done <<<"$file_contentscx"
 }
-
+IFS=$oldIFS
 swap_arrays() {
     local -n arr1="$1"
     local -n arr2="$2"
@@ -1301,7 +1315,9 @@ start_x=REPLACE_AREA_STARTX
 start_y=REPLACE_AREA_STARTY
 end_x=REPLACE_AREA_ENDX
 end_y=REPLACE_AREA_ENDY
+oldIFS=$IFS
 get_part_of_region $start_x $start_y $end_x $end_y $screen_width
+IFS=$oldIFS
 """
 ADB_SHELL_HEXDUMP = "hexdump -c %s"
 ADB_SHELL_COUNT_LINES_IN_FILE = "wc -l %s"
@@ -1452,7 +1468,7 @@ devinput="REPLACE_DEVINPUT"
 scriptname="REPLACE_SCRIPTNAME"
 binfolder="REPLACE_BINFOLDER"
 blocksize=REPLACE_BLOCKSIZE
-
+oldIFS=$IFS
 capture_data_file="/sdcard/$tmpfilegetevent"
 tmpfile="/sdcard/$tmpfilesendevent"
 ev="/dev/input/$devinput"
@@ -1554,7 +1570,7 @@ sendevent "$ev" 0 2 0
 sendevent "$ev" 0 0 0
 EOF
 }
-
+IFS=$oldIFS
 """
 
 ADB_SHELL_SENDEVENT_SCRIPT = """
@@ -1919,3 +1935,226 @@ ADB_SHELL_TEST_CHARACTER_LINK = '''
     else
         echo 0
     fi'''
+
+ADB_SHELL_IS_VALID_INT="""
+validint() {
+    # https://github.com/epety/100-shell-script-examples/blob/master/005-validint.sh
+
+    number="$1"
+    min="$2"
+    max="$3"
+
+    if [ -z $number ]; then
+        return 1
+    fi
+
+    if [ "${number%${number#?}}" = "-" ]; then # first char '-' ?
+        testvalue="${number#?}"                # all but first character
+    else
+        testvalue="$number"
+    fi
+
+    nodigits="$(echo $testvalue | sed 's/[[:digit:]]//g')"
+
+    if [ ! -z $nodigits ]; then
+        return 1
+    fi
+
+    if [ ! -z $min ]; then
+        if [ "$number" -lt "$min" ]; then
+            return 1
+        fi
+    fi
+    if [ ! -z $max ]; then
+        if [ "$number" -gt "$max" ]; then
+            return 1
+        fi
+    fi
+    return 0
+}
+"""
+
+ADB_SHELL_COUNT_CHAR_IN_STRING="""
+#!/bin/bash
+
+count_char_in_string(){
+input_string="$1"
+char_to_count="$2"
+char_removed="${input_string//[^$char_to_count]}"
+count="${#char_removed}"
+echo "$count"
+}
+
+
+"""
+
+ADB_SHELL_IS_VALID_FLOAT="""
+
+validfloat() {
+    # https://github.com/epety/100-shell-script-examples/blob/master/006-validfloat.sh
+    fvalue="$1"
+
+    if [ ! -z $(echo $fvalue | sed 's/[^.]//g') ]; then
+
+        decimalPart="$(echo $fvalue | cut -d. -f1)"
+        fractionalPart="$(echo $fvalue | cut -d. -f2)"
+
+        if [ ! -z $decimalPart ]; then
+            if ! validint "$decimalPart" "" ""; then
+                return 1
+            fi
+        fi
+
+        if [ "${fractionalPart%${fractionalPart#?}}" = "-" ]; then
+            return 1
+        fi
+        if [ "$fractionalPart" != "" ]; then
+            if ! validint "$fractionalPart" "0" ""; then
+                return 1
+            fi
+        fi
+
+        if [ "$decimalPart" = "-" -o -z $decimalPart ]; then
+            if [ -z $fractionalPart ]; then
+                return 1
+            fi
+        fi
+
+    else
+        if [ "$fvalue" = "-" ]; then
+            return 1
+        fi
+
+        if ! validint "$fvalue" "" ""; then
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
+""" + ADB_SHELL_COUNT_CHAR_IN_STRING + '\n' + ADB_SHELL_IS_VALID_INT + '\n'
+
+ADB_SHELL_FILE_LISTING_HUMAN_READABLE=R"""
+#!/bin/sh
+cd REPLACEDIR
+# https://github.com/epety/100-shell-script-examples/blob/master/018-formatdir.sh
+gmk()
+{
+  echo "${1} Kb"
+}
+
+if [ $# -gt 1 ] ; then
+  echo "Usage: $0 [dirname]" >&2; exit 1
+elif [ $# -eq 1 ] ; then
+  cd "$@"
+fi
+
+for file in *
+do 
+  if [ -d "$file" ] ; then
+    size=$(ls "$file" | wc -l | sed 's/[^[:digit:]]//g')
+    if [ $size -eq 1 ] ; then
+      echo "$file ($size entry)|"
+    else
+      echo "$file ($size entries)|"
+    fi
+  else
+    size="$(ls -sk "$file" | awk '{print $1}')"
+    echo "$file ($(gmk $size))|"
+  fi
+done | \
+  sed 's/ /^^^/g'  | \
+  xargs -n 2     | \
+  sed 's/\^\^\^/ /g' | \
+  awk -F\| '{ printf "%-39s\n%-39s\n", $1, $2 }'
+
+
+"""
+
+ADB_SHELL_FIND_FULL_FILEPATH='find %s -print'
+
+ADB_SHELL_CHECK_ENVIRONMENT_VARS=R"""
+# https://github.com/epety/100-shell-script-examples/blob/master/047-validator.sh
+errors=0
+
+in_path() {
+    # given a command and the PATH, try to find the command. Returns
+    # 1 if found, 0 if not.  Note that this temporarily modifies the
+    # the IFS input field seperator, but restores it upon completion.
+    cmd=$1 path=$2 retval=0
+
+    oldIFS=$IFS
+    IFS=":"
+
+    for directory in $path; do
+        if [ -x $directory/$cmd ]; then
+            retval=1 # if we're here, we found $cmd in $directory
+        fi
+    done
+    IFS=$oldIFS
+    return $retval
+}
+
+validate() {
+    varname=$1 varvalue=$2
+
+    if [ ! -z $varvalue ]; then
+        if [ "${varvalue%${varvalue#?}}" = "/" ]; then
+            if [ ! -x $varvalue ]; then
+                echo "** $varname set to $varvalue, but I cannot find executable."
+                errors=$(($errors + 1))
+            fi
+        else
+            if in_path $varvalue $PATH; then
+                echo "** $varname set to $varvalue, but I cannot find it in PATH."
+                errors=$(($errors + 1))
+            fi
+        fi
+    fi
+}
+
+####### Beginning of actual shell script #######
+
+if [ ! -x ${SHELL:?"Cannot proceed without SHELL being defined."} ]; then
+    echo "** SHELL set to $SHELL, but I cannot find that executable."
+    errors=$(($errors + 1))
+fi
+
+if [ ! -d ${HOME:?"You need to have your HOME set to your home directory"} ]; then
+    echo "** HOME set to $HOME, but it's not a directory."
+    errors=$(($errors + 1))
+fi
+
+# Our first interesting test: are all the paths in PATH valid?
+
+oldIFS=$IFS
+IFS=":" # IFS is the field separator. We'll change to ':'
+
+for directory in $PATH; do
+    if [ ! -d $directory ]; then
+        echo "** PATH contains invalid directory $directory"
+        errors=$(($errors + 1))
+    fi
+done
+
+IFS=$oldIFS # restore value for rest of script
+
+# The following can be undefined, and they can also be a progname, rather
+# than a fully qualified path.  Add additional variables as necessary for
+# your site and user community.
+
+validate "EDITOR" $EDITOR
+validate "MAILER" $MAILER
+validate "PAGER" $PAGER
+
+# and, finally, a different ending depending on whether errors > 0
+
+echo "ERRORS:$errors"
+
+
+"""
+
+ADB_SHELL_PRINTENV='printenv'
+ADB_SHELL_FREEZE_PROC='kill -19 %s'
+ADB_SHELL_UNFREEZE_PROC='kill -18 %s'

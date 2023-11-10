@@ -39,6 +39,7 @@ from collections import deque
 from time import sleep as sleep_
 from math import floor
 from functools import cache
+
 numberreg = re.compile(r"\[([^,]+),([^,]+)\]\[([^,]+),([^,]+)\]", flags=re.I)
 
 CREATE_NEW_PROCESS_GROUP = 0x00000200
@@ -3740,6 +3741,76 @@ class AdbControl(AdbControlBase):
     def sh_get_bios_info(self, **kwargs):
         return self.execute_sh_command(c.ADB_SHELL_GET_BIOS_INFORMATION, **kwargs)
 
+    @change_args_kwargs(args_and_function=(("file", _escape_filepath),))
+    def sh_wait_until_file_written_to_disk(self, file, interval, **kwargs):
+        return self.execute_sh_command(
+            c.ADB_SHELL_CHECK_FILESIZE
+            + f"\ncheck_if_finished_writing {file} {interval}\n",
+            **kwargs,
+        )
+
+    @change_args_kwargs(args_and_function=(("folder", _escape_filepath),))
+    def sh_ls_human_readable(self, folder, **kwargs):
+        return self.execute_sh_command(
+            c.ADB_SHELL_FILE_LISTING_HUMAN_READABLE.replace("REPLACEDIR", folder),
+            **kwargs,
+        )
+
+    @change_args_kwargs(args_and_function=(("folder", _escape_filepath),))
+    def sh_find_all_folder_full_path(self, folder, **kwargs):
+        return self.execute_sh_command(
+            c.ADB_SHELL_FIND_FULL_FILEPATH % folder, **kwargs
+        )
+
+    def sh_check_environment_vars(self, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_CHECK_ENVIRONMENT_VARS, **kwargs)
+
+    def sh_printenv(self, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_PRINTENV, **kwargs)
+
+    @add_to_kwargs(v=(("su", True),))
+    def sh_freeze_proc(self, pid, **kwargs):
+        return self.execute_sh_command(
+            c.ADB_SHELL_FREEZE_PROC % str(int(pid)), **kwargs
+        )
+
+    @add_to_kwargs(v=(("su", True),))
+    def sh_unfreeze_proc(self, pid, **kwargs):
+        return self.execute_sh_command(
+            c.ADB_SHELL_UNFREEZE_PROC % str(int(pid)), **kwargs
+        )
+
+    def sh_is_valid_float(self, n, **kwargs):
+        cmd = (
+            c.ADB_SHELL_IS_VALID_FLOAT
+            + f"""
+if [ $(count_char_in_string {n} .) -gt 1 ]; then
+    echo 0
+else
+    if validfloat {n}; then
+        echo 1
+    else
+        echo 0
+    fi
+fi
+\n"""
+        )
+        so, se = self.execute_sh_command(cmd, **kwargs)
+        return bool(int(so[0].strip()))
+
+    def sh_is_valid_int(self, n, **kwargs):
+        cmd = (
+            c.ADB_SHELL_IS_VALID_INT
+            + f"""
+if validint {n}; then
+    echo 1
+else
+    echo 0
+fi\n"""
+        )
+        so, se = self.execute_sh_command(cmd, **kwargs)
+        return bool(int(so[0].strip()))
+
     def rgb_values_of_area(
         self,
         start_x,
@@ -4648,48 +4719,120 @@ class AdbControl(AdbControlBase):
             return so[0].strip().decode()
 
     def sh_test_directory(self, path, **kwargs):
-        return bool(int(self.execute_sh_command(c.ADB_SHELL_TEST_DIRECTORY % path, **kwargs)[0][0].strip()))
+        return bool(
+            int(
+                self.execute_sh_command(c.ADB_SHELL_TEST_DIRECTORY % path, **kwargs)[0][
+                    0
+                ].strip()
+            )
+        )
 
     def sh_test_exists_in_any_form(self, path, **kwargs):
-        return bool(int(self.execute_sh_command(c.ADB_SHELL_TEST_EXISTS_IN_ANY_FORM % path, **kwargs)[0][0].strip()))
+        return bool(
+            int(
+                self.execute_sh_command(
+                    c.ADB_SHELL_TEST_EXISTS_IN_ANY_FORM % path, **kwargs
+                )[0][0].strip()
+            )
+        )
 
     def sh_test_executable(self, path, **kwargs):
-        return bool(int(self.execute_sh_command(c.ADB_SHELL_TEST_EXECUTABLE % path, **kwargs)[0][0].strip()))
+        return bool(
+            int(
+                self.execute_sh_command(c.ADB_SHELL_TEST_EXECUTABLE % path, **kwargs)[
+                    0
+                ][0].strip()
+            )
+        )
 
     def sh_test_regular_file(self, path, **kwargs):
-        return bool(int(self.execute_sh_command(c.ADB_SHELL_TEST_REGULAR_FILE % path, **kwargs)[0][0].strip()))
+        return bool(
+            int(
+                self.execute_sh_command(c.ADB_SHELL_TEST_REGULAR_FILE % path, **kwargs)[
+                    0
+                ][0].strip()
+            )
+        )
 
     def sh_test_readable(self, path, **kwargs):
-        return bool(int(self.execute_sh_command(c.ADB_SHELL_TEST_READABLE % path, **kwargs)[0][0].strip()))
+        return bool(
+            int(
+                self.execute_sh_command(c.ADB_SHELL_TEST_READABLE % path, **kwargs)[0][
+                    0
+                ].strip()
+            )
+        )
 
     def sh_test_named_pipe(self, path, **kwargs):
-        return bool(int(self.execute_sh_command(c.ADB_SHELL_TEST_NAMED_PIPE % path, **kwargs)[0][0].strip()))
+        return bool(
+            int(
+                self.execute_sh_command(c.ADB_SHELL_TEST_NAMED_PIPE % path, **kwargs)[
+                    0
+                ][0].strip()
+            )
+        )
 
     def sh_test_block_device(self, path, **kwargs):
-        return bool(int(self.execute_sh_command(c.ADB_SHELL_TEST_BLOCK_DEVICE % path, **kwargs)[0][0].strip()))
+        return bool(
+            int(
+                self.execute_sh_command(c.ADB_SHELL_TEST_BLOCK_DEVICE % path, **kwargs)[
+                    0
+                ][0].strip()
+            )
+        )
 
     def sh_test_character_device(self, path, **kwargs):
-        return bool(int(self.execute_sh_command(c.ADB_SHELL_TEST_CHARACTER_DEVICE % path, **kwargs)[0][0].strip()))
+        return bool(
+            int(
+                self.execute_sh_command(
+                    c.ADB_SHELL_TEST_CHARACTER_DEVICE % path, **kwargs
+                )[0][0].strip()
+            )
+        )
 
     def sh_test_link(self, path, **kwargs):
-        return bool(int(self.execute_sh_command(c.ADB_SHELL_TEST_CHARACTER_LINK % path, **kwargs)[0][0].strip()))
+        return bool(
+            int(
+                self.execute_sh_command(
+                    c.ADB_SHELL_TEST_CHARACTER_LINK % path, **kwargs
+                )[0][0].strip()
+            )
+        )
 
-
-    def sh_scrape_html(self,file_path,mainblocks,subblocks,**kwargs):
+    def sh_scrape_html(self, file_path, mainblocks, subblocks, **kwargs):
         try:
-            cmd = ('cat %s | sed -r \'s/(' % strip_quotes_and_escape(file_path) + (
-                q := "|".join([h for h in mainblocks])) + f')/\\n\\1/g\' | grep -E \'({q})\' | sed -r \'s/(' + "|".join(
-                [h for h in subblocks]) + ')/\\n\\1/g\' | grep -E ' '\'(' + "|".join([h for h in subblocks + mainblocks]) + ')\'')
-            so, se = self.execute_sh_command(cmd,**kwargs)
-            decoded = b''.join(so).decode('utf-8', 'backslashreplace').strip()
-            r = [v.start() for v in (re.finditer('(' + "|".join([h for h in mainblocks]) + ')', decoded))]
-            b2 = '(' + "|".join([h for h in subblocks + mainblocks]) + ')'
+            cmd = (
+                "cat %s | sed -r 's/(" % strip_quotes_and_escape(file_path)
+                + (q := "|".join([h for h in mainblocks]))
+                + f")/\\n\\1/g' | grep -E '({q})' | sed -r 's/("
+                + "|".join([h for h in subblocks])
+                + ")/\\n\\1/g' | grep -E "
+                "'(" + "|".join([h for h in subblocks + mainblocks]) + ")'"
+            )
+            so, se = self.execute_sh_command(cmd, **kwargs)
+            decoded = b"".join(so).decode("utf-8", "backslashreplace").strip()
+            r = [
+                v.start()
+                for v in (
+                    re.finditer("(" + "|".join([h for h in mainblocks]) + ")", decoded)
+                )
+            ]
+            b2 = "(" + "|".join([h for h in subblocks + mainblocks]) + ")"
             result1 = list_split(l=decoded, indices_or_sections=r)
-            result2 = [[j for j in q if j] for q in
-                       [list_split(l=ri, indices_or_sections=[y.start() for y in re.finditer(b2, ri)]) for ri in result1 if ri]]
+            result2 = [
+                [j for j in q if j]
+                for q in [
+                    list_split(
+                        l=ri,
+                        indices_or_sections=[y.start() for y in re.finditer(b2, ri)],
+                    )
+                    for ri in result1
+                    if ri
+                ]
+            ]
             return result2
         except Exception as fe:
-            sys.stderr.write(f'{fe}')
+            sys.stderr.write(f"{fe}")
             sys.stderr.flush()
             return []
 

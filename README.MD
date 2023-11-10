@@ -2301,7 +2301,7 @@ if executecmds:
                 y
                 for y in x
                 if "ovm-FixtureDetailsWithIndicators_PlayingIndicator" in y
-                   or y.startswith("ParticipantOddsOnly_Odds")
+                or y.startswith("ParticipantOddsOnly_Odds")
             ]
             for x in htmlresults
         ]
@@ -2418,5 +2418,64 @@ if executecmds:
     # Liv Hovde
     # 7.00
     # 1.083
+    # ls -R / > /sdcard/lstest.txt -> execute that in another shell
+    eval_shell.sh_wait_until_file_written_to_disk(
+        file="/sdcard/lstest.txt", interval=0.1
+    )
+    eval_shell.sh_cat_file("/sdcard/lstest.txt")
+
+    eval_shell.sh_is_valid_float(10.11)
+    eval_shell.sh_is_valid_float("10.11.11")
+
+    eval_shell.sh_is_valid_int(1011)
+    eval_shell.sh_is_valid_int("10.11")
+    eval_shell.sh_ls_human_readable("/sdcard/")
+
+    eval_shell.sh_find_all_folder_full_path("/sdcard/")
+    eval_shell.sh_check_environment_vars()
+    # [[b'** PATH contains invalid directory /system/sbin\n',
+    #   b'** PATH contains invalid directory /odm/bin\n',
+    #   b'** PATH contains invalid directory /vendor/xbin\n',
+    #   b'ERRORS:3\n'],
+    eval_shell.sh_printenv()
+
+    eval_shell.sh_freeze_proc("PID HERE")
+    eval_shell.sh_unfreeze_proc("PID HERE")
+    ############################################################################
+    # to avoid UiAutomator crashes
+    blocked = [
+        eval_shell.sh_freeze_proc(int(x.strip().split()[1]))
+        for x in eval_shell.sh_list_current_running_procs()[0]
+        if b"com.kiwibrowser.browser:sandboxed_process" in x
+    ]
+    sleep(0.5)
+    df = eval_shell.uiautomator_nice20(as_pandas=False)
+    import pandas as pd
+
+    df = pd.DataFrame(df).T
+    unblocked = [
+        eval_shell.sh_unfreeze_proc(int(x.strip().split()[1]))
+        for x in eval_shell.sh_list_current_running_procs()[0]
+        if b"com.kiwibrowser.browser:sandboxed_process" in x
+    ]
+    allg = []
+    df2 = df.explode("all_parents")
+    for name, group in df2.groupby("all_parents"):
+        if not group.loc[group["class"] == "android.widget.TextView"].empty:
+            if list(map(int, group["index"].to_list())) in [[0, 1, 2], [0]]:
+                if len(group) == 3:
+                    allg.append([True, group])
+                else:
+                    allg.append([False, group])
+
+    from loophopper import FFIter
+
+    l = FFIter(allg, ignore_exceptions=True, exception_replacement=None)
+    for no in l:
+        if no[0] is True:
+            dfax = pd.concat([l.back(2)[1], l.back(1)[1], no[1]], ignore_index=True)
+            print(dfax)
+    ############################################################################
+
 
 ```
