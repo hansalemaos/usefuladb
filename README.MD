@@ -2476,6 +2476,62 @@ if executecmds:
             dfax = pd.concat([l.back(2)[1], l.back(1)[1], no[1]], ignore_index=True)
             print(dfax)
     ############################################################################
+    # to avoid UiAutomator crashes
+    blocked = [
+        eval_shell.sh_freeze_proc(int(x.strip().split()[1]))
+        for x in eval_shell.sh_list_current_running_procs()[0]
+        if b"com.kiwibrowser.browser:sandboxed_process" in x
+    ]
+    sleep(0.5)
+    df = eval_shell.uiautomator_nice20(as_pandas=False)
+    import pandas as pd
 
+    df = pd.DataFrame(df).T
+    unblocked = [
+        eval_shell.sh_unfreeze_proc(int(x.strip().split()[1]))
+        for x in eval_shell.sh_list_current_running_procs()[0]
+        if b"com.kiwibrowser.browser:sandboxed_process" in x
+    ]
+    allg = []
+    df2 = df.explode("all_parents")
+    for name, group in df2.groupby("all_parents"):
+        # print(group)
+        try:
 
+            if list(map(int, group["index"].to_list()[:4])) in [[0, 1, 0, 1], [0, 0]]:
+                if len(group) == 2:
+                    if not group.loc[group.text.astype('string').str.contains(r'^\d+\.\d+$')].empty:
+                        allg.append(group)
+                if len(group) > 4:
+                    g3 = group.loc[(group['index'] == '1') & (~group['text'].str.contains(r'^\d+$'))]
+                    if len(g3) == 2:
+                        allg.append(g3)
+        except Exception:
+            continue
+    finalresus = [pd.concat(allg[x:x + 2], ignore_index=True) for x in range(0, len(allg), 2)]
+    ############################################################################
+    # Bounding boxes for elements on screen
+    eval_shell.sh_show_fragments_on_screen()
+
+    # Manage your settings
+    # manager0
+    # Out[5]:
+    # {'secure': {'accessibility_captioning_enabled': {'value': '1',
+    #    'get_value': (),
+    #    'put_value': ()},
+    #   'accessibility_display_inversion_enabled': {'value': 'null',
+    #    'get_value': (),
+    #    'put_value': ()},
+    #   'accessibility_display_magnification_enabled': {'value': '0',
+    #    'get_value': (),
+    #    'put_value': ()},
+
+    # manager0.secure.accessibility_display_magnification_scale.put_value(4.0)
+    # Out[6]: ''
+    # manager0.secure.accessibility_display_magnification_scale.get_value()
+    # Out[7]: '4.0'
+    manager0 = eval_shell.sh_get_settings_manager()
+
+    # same thing for getprop
+    manager1 = eval_shell.sh_get_getprop_setprop_manager()
 ```

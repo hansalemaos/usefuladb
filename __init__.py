@@ -5388,6 +5388,146 @@ fi\n"""
         self.execute_sh_command(c.ADB_SHELL_REMOVE_STDERR_TMPFILES_G, **kwargs)
         self.execute_sh_command(c.ADB_SHELL_REMOVE_STDOUT_TMPFILES_G, **kwargs)
 
+    def sh_show_fragments_on_screen(self, **kwargs):
+        return self.execute_sh_command(c.ADB_SHELL_SHOW_FRAGMENTS_ON_SCREEN, **kwargs)
+
+    def sh_get_settings_manager(self, **kwargs):
+        allcats = ["secure", "system", "global"]
+        pdi = PunktDict()
+        for ca in allcats:
+            pdi[ca] = PunktDict(
+                dict(
+                    [
+                        (
+                            cc[0],
+                            {
+                                "value": cc[1],
+                                "get_value": PartialAdb(
+                                    self.execute_sh_command,
+                                    callback=format_partial_result,
+                                    funame=f"()",
+                                    args=(f"settings get {ca} {cc[0]}",),
+                                    kwargs=kwargs,
+                                ),
+                                "put_value": PartialAdb(
+                                    self.execute_sh_command,
+                                    callback=format_partial_result,
+                                    funame=f"()",
+                                    args=(f"settings put {ca} {cc[0]}",),
+                                    kwargs=kwargs,
+                                ),
+                            },
+                        )
+                        for cc in [
+                            f
+                            for f in [
+                                x.decode("utf-8", "backslashreplace")
+                                .strip()
+                                .split("=", maxsplit=1)
+                                for x in self.execute_sh_command(f"settings list {ca}")[
+                                    0
+                                ]
+                            ]
+                            if len(f) == 2
+                        ]
+                    ]
+                )
+            )
+
+        return pdi
+    @add_to_kwargs(v=(("su", True),))
+
+    def sh_get_getprop_setprop_manager(self, **kwargs):
+
+
+        def get_va(kvz, j):
+            try:
+                return kvz[j][2]
+            except Exception:
+                return None
+
+        kvz = [
+            [SettingsChanger(
+                p1=PartialAdb(
+                    self.execute_sh_command,
+                    callback=format_partial_result,
+                    funame=f"()",
+                    args=(f"setprop {z[0][1:-1]}",),
+                    kwargs=kwargs, ),
+                p2=PartialAdb(
+                    self.execute_sh_command,
+                    callback=format_partial_result,
+                    funame=f"()",
+                    args=(f'setprop {z[0][1:-1].split(".", maxsplit=1)[-1]}',),
+                    kwargs=kwargs, ), ),
+                z[0][1:-1],
+                z[1][1:-1], ]
+            for z in [
+                y.split(": ", maxsplit=1)
+                for y in [
+                    x.strip().decode("utf-8", "backslashreplace")
+                    for x in self.execute_sh_command("getprop", **kwargs)[0]
+                ]
+            ]
+        ]
+
+        return PunktDict(
+            [
+                (
+                    kvz[j][1].replace(".", "_"),
+                    {
+                        "setprop": kvz[j][0],
+                        "value": get_va(kvz, j),
+                    },
+                )
+                for j in range(len(kvz))
+            ]
+        )
+
+def format_partial_result(stdout, stderr):
+    if stdout:
+        return stdout[0].decode("utf-8", "backslashreplace").strip()
+
+    return ""
+
+
+class PartialAdb:
+    def __init__(self, fu, callback=None, funame="", args=None, kwargs=None):
+        self.callback = callback
+        self.args = args
+        self.kwargs = kwargs
+        if not args:
+            self.args = ()
+        if not kwargs:
+            self.kwargs = {}
+        self.fu = fu
+        self.last_command_ok = []
+        self.funame = funame
+
+    def __call__(self, *args, thisargsfirst=False, ignore_exceptions=True, **kwargs):
+        if thisargsfirst:
+            o = " ".join(list(map(str, (*args, *self.args))))
+        else:
+            o = " ".join(list(map(str, (*self.args, *args))))
+        newkwargs = self.kwargs.copy()
+        newkwargs.update(kwargs)
+        try:
+            v = self.fu(o, **kwargs)
+            if callable(self.callback):
+                v = self.callback(*v)
+            self.last_command_ok.append(1)
+            return v
+        except Exception as e:
+            if not ignore_exceptions:
+                raise e
+            self.last_command_ok.append(0)
+
+    def __str__(self):
+        return self.funame
+
+    def __repr__(self):
+        return self.__str__()
+
 
 class FuExec:
     def __init__(self, fu, *oldargs, **oldkwargs):
@@ -5423,6 +5563,15 @@ class SendEventKeyPress:
     def __repr__(self):
         return self.stripri
 
+
+class SettingsChanger:
+    def __init__(self, p1, p2):
+        self.p1 = p1
+        self.p2 = p2
+
+    def __call__(self, *args, **kwargs):
+        self.p1(*args, **kwargs)
+        self.p2(*args, **kwargs)
 
 @cache
 def get_file_rights(x):

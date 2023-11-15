@@ -2158,3 +2158,5 @@ echo "ERRORS:$errors"
 ADB_SHELL_PRINTENV='printenv'
 ADB_SHELL_FREEZE_PROC='kill -19 %s'
 ADB_SHELL_UNFREEZE_PROC='kill -18 %s'
+ADB_SHELL_SHOW_FRAGMENTS_ON_SCREEN="""setprop debug.layout true
+service call activity 1599295570"""
