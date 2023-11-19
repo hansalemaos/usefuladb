@@ -20,6 +20,7 @@ from flatten_any_dict_iterable_or_whatsoever import fla_tu
 from indent2dict import indent2dict
 from lxml import etree
 from parifinder import parse_pairs
+from touchtouch import touch
 
 from .keyevents import key_events
 from fabisschomagut import to_rgb_hex, to_rgb_tuple
@@ -392,7 +393,7 @@ class SubProcInputOutput:
         self.cmd = cmd
         self.separate_stdout_with_list = separate_stdout_stderr_with_list
         self.separate_stderr_with_list = separate_stdout_stderr_with_list
-        self.lockobject = threading.Lock()
+        self.lockobject = threading.RLock()
         if self.separate_stdout_with_list:
             self.stdout = dequeslice([[]], maxlen=limit_stdout)
         else:
@@ -3681,6 +3682,37 @@ class AdbControl(AdbControlBase):
             ].strip()
         )
 
+    import re
+
+    @change_args_kwargs(args_and_function=(("src", _escape_filepath),))
+    def sh_all_full_file_path_from_dir(self, folder, **kwargs):
+        return self.execute_sh_command(
+            c.ADB_SHELL_PURE_ABS_PATH_OF_FILES % folder, **kwargs
+        )
+
+    @change_args_kwargs(args_and_function=(("src", _escape_filepath),))
+    def sh_pull_folder_with_cat(self, src, dst, **kwargs):
+        folder2copy = "/" + src.strip("/ ") + "/"
+        outfolder = dst.rstrip("/\\ ")
+
+        so, se = self.sh_all_full_file_path_from_dir(folder2copy, **kwargs)
+        for fi in so:
+            try:
+                file = fi.strip().decode("utf-8", "backslashreplace")
+                shorterpath = file[len(folder2copy) :]
+                outfol = os.path.normpath(
+                    os.path.join(
+                        outfolder, re.sub(r"[\\/]+", f"{os.sep}{os.sep}", shorterpath)
+                    )
+                )
+                touch(outfol)
+                catfi = self.sh_cat_file(file, **kwargs)
+                with open(outfol, mode="wb") as fx:
+                    fx.write(catfi)
+            except Exception as fe:
+                sys.stderr.write(f"\n{fe}\n")
+                sys.stderr.flush()
+
     @change_args_kwargs(args_and_function=(("folder", _escape_filepath),))
     def sh_get_treeview_of_folder(self, folder, **kwargs):
         if "print_stdout" not in kwargs:
@@ -5435,11 +5467,9 @@ fi\n"""
             )
 
         return pdi
+
     @add_to_kwargs(v=(("su", True),))
-
     def sh_get_getprop_setprop_manager(self, **kwargs):
-
-
         def get_va(kvz, j):
             try:
                 return kvz[j][2]
@@ -5447,21 +5477,26 @@ fi\n"""
                 return None
 
         kvz = [
-            [SettingsChanger(
-                p1=PartialAdb(
-                    self.execute_sh_command,
-                    callback=format_partial_result,
-                    funame=f"()",
-                    args=(f"setprop {z[0][1:-1]}",),
-                    kwargs=kwargs, ),
-                p2=PartialAdb(
-                    self.execute_sh_command,
-                    callback=format_partial_result,
-                    funame=f"()",
-                    args=(f'setprop {z[0][1:-1].split(".", maxsplit=1)[-1]}',),
-                    kwargs=kwargs, ), ),
+            [
+                SettingsChanger(
+                    p1=PartialAdb(
+                        self.execute_sh_command,
+                        callback=format_partial_result,
+                        funame=f"()",
+                        args=(f"setprop {z[0][1:-1]}",),
+                        kwargs=kwargs,
+                    ),
+                    p2=PartialAdb(
+                        self.execute_sh_command,
+                        callback=format_partial_result,
+                        funame=f"()",
+                        args=(f'setprop {z[0][1:-1].split(".", maxsplit=1)[-1]}',),
+                        kwargs=kwargs,
+                    ),
+                ),
                 z[0][1:-1],
-                z[1][1:-1], ]
+                z[1][1:-1],
+            ]
             for z in [
                 y.split(": ", maxsplit=1)
                 for y in [
@@ -5483,6 +5518,7 @@ fi\n"""
                 for j in range(len(kvz))
             ]
         )
+
 
 def format_partial_result(stdout, stderr):
     if stdout:
@@ -5572,6 +5608,7 @@ class SettingsChanger:
     def __call__(self, *args, **kwargs):
         self.p1(*args, **kwargs)
         self.p2(*args, **kwargs)
+
 
 @cache
 def get_file_rights(x):

@@ -658,6 +658,9 @@ if executecmds:
 
     # You can also push and pull entire folders:
     blocking_shell.pull_folder("/sdcard/Download", "c:\\babababaxx")
+    # or 
+    blocking_shell.sh_pull_folder_with_cat("/sdcard/Download", "c:\\babababaxx")
+    
 
     # Push a folder from the local machine to the device:
     blocking_shell.push_folder(r"C:\qqqqqqqqqqqq", "/sdcard/")
