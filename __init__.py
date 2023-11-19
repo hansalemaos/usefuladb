@@ -393,7 +393,7 @@ class SubProcInputOutput:
         self.cmd = cmd
         self.separate_stdout_with_list = separate_stdout_stderr_with_list
         self.separate_stderr_with_list = separate_stdout_stderr_with_list
-        self.lockobject = threading.RLock()
+        self.lockobject = threading.Lock()
         if self.separate_stdout_with_list:
             self.stdout = dequeslice([[]], maxlen=limit_stdout)
         else:
