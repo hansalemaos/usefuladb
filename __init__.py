@@ -876,6 +876,7 @@ class AdbControlBase(SubProcInputOutput):
         self.global_cmd_timeout = global_cmd_timeout
         self.use_eval = use_eval
         self.eval_timeout = eval_timeout
+        self.communication_port = None
         if connect_to_device:
             subprocess.run([self.adb_path, "connect", device_serial], **invisibledict)
         super().__init__(
@@ -1044,7 +1045,13 @@ class AdbControlBase(SubProcInputOutput):
         self.p.stdin.flush()
         stdout = "/sdcard/outputfilexxxstdout.txt"
         stderr = "/sdcard/outputfilexxxstderr.txt"
-        freeport = get_free_port()
+        if not self.communication_port:
+            self.communication_port = get_free_port()
+            p1 = subprocess.run(
+                f"{self.adbpath} -s {self.device_serial} forward tcp:{self.communication_port} tcp:{self.communication_port}",
+                capture_output=True,
+                **invisibledict,
+            )
         su = kwargs.get("su", self.su)
         if su:
             linetoadd = f'''eval "cat {path} | su -c 'sh 2> {stderr} 1> {stdout}'"'''
@@ -1056,7 +1063,7 @@ startpro(){{
 {linetoadd}
 echo -e -n "XXXXENDSTDOUTXXXX" >> {stdout}
 echo -e -n "XXXXENDSTDERRXXXX" >> {stderr}
-cat  {stdout} {stderr} | busybox nc -w {timeout} -l -p {freeport}
+cat  {stdout} {stderr} | busybox nc -w {timeout} -l -p {self.communication_port}
 rm -f {stderr}
 rm -f {stdout}
 rm -f {path}
@@ -1065,11 +1072,7 @@ startpro 2> /dev/null
 \n""".encode()
         self.p.stdin.write(enicmd2)
         self.p.stdin.flush()
-        p1 = subprocess.run(
-            f"{self.adbpath} -s {self.device_serial} forward tcp:{freeport} tcp:{freeport}",
-            capture_output=True,
-            **invisibledict,
-        )
+
         # print(p1.stdout)
         # print(p1.stderr)
 
@@ -1078,7 +1081,7 @@ startpro 2> /dev/null
 
         while time.time() < timeoutfinal:
             try:
-                nc = nclib.Netcat(connect=("localhost", freeport))
+                nc = nclib.Netcat(connect=("localhost", self.communication_port))
 
                 r = nc.read_all(timeout=timeout)
                 if r:
@@ -1090,11 +1093,11 @@ startpro 2> /dev/null
                     nc.close()
                 except Exception as fa:
                     print(fa)
-        p2 = subprocess.run(
-            f"{self.adbpath} -s {self.device_serial} forward --remove tcp:{freeport}",
-            capture_output=True,
-            **invisibledict,
-        )
+        # p2 = subprocess.run(
+        #     f"{self.adbpath} -s {self.device_serial} forward --remove tcp:{freeport}",
+        #     capture_output=True,
+        #     **invisibledict,
+        # )
         # print(p2.stdout)
         # print(p2.stderr)
         stdout, stderr = b"", b""
